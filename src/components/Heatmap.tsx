@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { EXAM_DEADLINE, subjectById } from '../data/catalog'
+import { EXAM_DEADLINE } from '../data/catalog'
 import type { HeatmapCell, SubjectId } from '../types'
 import { formatZhDate, toLocalDate } from '../utils/date'
 import { SUBJECT_LANES } from '../utils/schedule'
@@ -8,7 +8,7 @@ interface HeatmapProps {
   cells: HeatmapCell[]
 }
 
-const rowLabels = ['日', '一', '二', '三', '四', '五', '六']
+const rowLabels = ['一', '二', '三', '四', '五', '六', '日']
 
 const laneLabels: Record<SubjectId, string> = {
   math: '数学',
@@ -29,6 +29,9 @@ const getCellTone = (cell: HeatmapCell) => {
   if (cell.completionRate < 90) return 'medium'
   return 'hot'
 }
+
+const getMondayFirstDayIndex = (date: string) =>
+  (toLocalDate(date).getDay() + 6) % 7
 
 const summarizeAssignedTasks = (cell: HeatmapCell) =>
   SUBJECT_LANES.map((subjectId) => {
@@ -71,7 +74,7 @@ export function Heatmap({ cells }: HeatmapProps) {
       return { weeks: [] as Array<Array<HeatmapCell | null>>, monthLabels: [] }
     }
 
-    const firstDay = toLocalDate(cells[0].date).getDay()
+    const firstDay = getMondayFirstDayIndex(cells[0].date)
     const weekCount = Math.ceil((cells.length + firstDay) / 7)
     const weeks = Array.from({ length: weekCount }, () =>
       Array<HeatmapCell | null>(7).fill(null),
@@ -129,7 +132,6 @@ export function Heatmap({ cells }: HeatmapProps) {
                   type="button"
                   aria-label={buildTooltip(cell)}
                   data-tip={buildTooltip(cell)}
-                  title={buildTooltip(cell)}
                 >
                   {SUBJECT_LANES.map((subjectId) => {
                     const task = cell.assignedBySubject[subjectId]
@@ -143,11 +145,7 @@ export function Heatmap({ cells }: HeatmapProps) {
                             : ''
                         }`}
                         key={subjectId}
-                        title={
-                          task
-                            ? `${subjectById[subjectId].name}: ${task.title}`
-                            : `${subjectById[subjectId].name}: 空`
-                        }
+                        aria-hidden="true"
                       />
                     )
                   })}

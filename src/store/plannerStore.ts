@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { createDefaultMacroTasks } from '../data/catalog'
+import { createDefaultMacroTasks, splitMacroTaskText } from '../data/catalog'
 import type { MacroTask, MicroTask, SubjectId, WorkspaceView } from '../types'
 import { addDaysISO, getTodayISO } from '../utils/date'
 
@@ -23,7 +23,11 @@ interface PlannerState {
   updateMacroTask: (id: string, patch: Partial<MacroTask>) => void
   toggleMacroTask: (id: string) => void
   deleteMacroTask: (id: string) => void
-  reorderMacroTask: (dragId: string, targetId: string) => void
+  reorderMacroTask: (
+    dragId: string,
+    targetId: string,
+    subjectId?: SubjectId,
+  ) => void
   resetDemoData: () => void
 }
 
@@ -105,6 +109,21 @@ const createInitialState = () => ({
   microTasks: createDefaultMicroTasks(),
 })
 
+const sanitizeMigratedMacroTasks = (macroTasks?: MacroTask[]) => {
+  if (!macroTasks) return createDefaultMacroTasks()
+
+  return macroTasks.map((task) => {
+    if (task.detail !== undefined) return task
+
+    const { title, detail } = splitMacroTaskText(task.title)
+    return {
+      ...task,
+      title,
+      detail,
+    }
+  })
+}
+
 const sanitizeMigratedMicroTasks = (microTasks?: MicroTask[]) => {
   if (!microTasks) return createDefaultMicroTasks()
 
@@ -132,17 +151,25 @@ const sanitizeMigratedMicroTasks = (microTasks?: MicroTask[]) => {
 
 const migratePlannerState = (persistedState: unknown, version: number) => {
   const state = (persistedState ?? {}) as Partial<PlannerState>
+  let nextState = state
 
   if (version < 2) {
-    return {
+    nextState = {
       ...state,
       macroTasks: createDefaultMacroTasks(),
       microTasks: sanitizeMigratedMicroTasks(state.microTasks),
       view: state.view ?? 'execution',
-    } as PlannerState
+    }
   }
 
-  return state as PlannerState
+  if (version < 3) {
+    nextState = {
+      ...nextState,
+      macroTasks: sanitizeMigratedMacroTasks(nextState.macroTasks),
+    }
+  }
+
+  return nextState as PlannerState
 }
 
 export const usePlannerStore = create<PlannerState>()(
@@ -215,27 +242,42 @@ export const usePlannerStore = create<PlannerState>()(
             task.macroTaskId === id ? { ...task, macroTaskId: undefined } : task,
           ),
         })),
-      reorderMacroTask: (dragId, targetId) => {
+      reorderMacroTask: (dragId, targetId, subjectId) => {
         if (dragId === targetId) return
 
         const ordered = [...get().macroTasks].sort(
           (left, right) => left.order - right.order,
         )
-        const dragIndex = ordered.findIndex((task) => task.id === dragId)
-        const targetIndex = ordered.findIndex((task) => task.id === targetId)
+        const reorderScope = subjectId
+          ? ordered.filter((task) => task.subjectId === subjectId)
+          : ordered
+        const dragIndex = reorderScope.findIndex((task) => task.id === dragId)
+        const targetIndex = reorderScope.findIndex((task) => task.id === targetId)
 
         if (dragIndex === -1 || targetIndex === -1) return
 
-        const [dragged] = ordered.splice(dragIndex, 1)
-        ordered.splice(targetIndex, 0, dragged)
-        set({ macroTasks: resequence(ordered) })
+        const nextScope = [...reorderScope]
+        const [dragged] = nextScope.splice(dragIndex, 1)
+        nextScope.splice(targetIndex, 0, dragged)
+
+        if (!subjectId) {
+          set({ macroTasks: resequence(nextScope) })
+          return
+        }
+
+        const scopeQueue = [...nextScope]
+        const merged = ordered.map((task) =>
+          task.subjectId === subjectId ? scopeQueue.shift() ?? task : task,
+        )
+
+        set({ macroTasks: resequence(merged) })
       },
       resetDemoData: () => set({ ...createInitialState(), view: 'execution' }),
     }),
     {
       name: 'exam-planner-state-v1',
       storage: createJSONStorage(() => localStorage),
-      version: 2,
+      version: 3,
       migrate: migratePlannerState,
     },
   ),

@@ -63,6 +63,20 @@ export const moduleById = SUBJECTS.flatMap((subject) => subject.modules).reduce(
 export const getModulesForSubject = (subjectId: SubjectId) =>
   subjectById[subjectId].modules
 
+export const splitMacroTaskText = (rawTitle: string) => {
+  const normalizedTitle = rawTitle.trim().replace(/^\[[^\]]+\]\s*/, '')
+  const detailMatch = normalizedTitle.match(/^(.*?)\s*[（(]([^()（）]+)[）)]\s*$/)
+
+  if (!detailMatch) {
+    return { title: normalizedTitle, detail: '' }
+  }
+
+  return {
+    title: detailMatch[1].trim(),
+    detail: detailMatch[2].trim(),
+  }
+}
+
 type ImportedMacroTask = {
   id: string
   subject: 'Math'
@@ -244,14 +258,19 @@ const getMathModuleIdFromTitle = (title: string) => {
 export const createDefaultMacroTasks = (): MacroTask[] =>
   [...importedMathMacroTasks]
     .sort((left, right) => left.order - right.order)
-    .map((task) => ({
-      id: task.id,
-      subjectId: getSubjectIdFromImport(task.subject),
-      moduleId: getMathModuleIdFromTitle(task.title),
-      title: task.title,
-      estimatedDays: task.estimatedDays,
-      order: task.order,
-      completed: false,
-      dependencies: [],
-      createdAt: new Date().toISOString(),
-    }))
+    .map((task) => {
+      const { title, detail } = splitMacroTaskText(task.title)
+
+      return {
+        id: task.id,
+        subjectId: getSubjectIdFromImport(task.subject),
+        moduleId: getMathModuleIdFromTitle(task.title),
+        title,
+        detail,
+        estimatedDays: task.estimatedDays,
+        order: task.order,
+        completed: false,
+        dependencies: [],
+        createdAt: new Date().toISOString(),
+      }
+    })

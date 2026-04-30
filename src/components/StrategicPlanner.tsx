@@ -1,5 +1,29 @@
 import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import type {
+  DragEndEvent,
+  DragStartEvent,
+  DraggableAttributes,
+  DraggableSyntheticListeners,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS as DndCSS } from '@dnd-kit/utilities'
+import {
   Check,
+  ChevronDown,
+  ChevronUp,
   GripVertical,
   Plus,
   RotateCcw,
@@ -7,7 +31,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { CSSProperties, FormEvent } from 'react'
 import {
   EXAM_DEADLINE,
   getModulesForSubject,
@@ -15,7 +39,7 @@ import {
   subjectById,
 } from '../data/catalog'
 import { usePlannerStore } from '../store/plannerStore'
-import type { SubjectId } from '../types'
+import type { MacroTask, SubjectId } from '../types'
 import { formatZhDate, getTodayISO } from '../utils/date'
 import { buildSchedule } from '../utils/schedule'
 import { Heatmap } from './Heatmap'
@@ -24,6 +48,188 @@ const defaultSubject: SubjectId = 'math'
 
 const clampTaskDays = (value: number) =>
   Number.isFinite(value) ? Math.min(240, Math.max(1, Math.round(value))) : 1
+
+const collapsedDetailRows = 1
+const expandedDetailRows = 6
+
+const estimateDetailRows = (detail: string) => {
+  if (!detail.trim()) return 1
+  return Math.max(1, detail.trim().split(/\r?\n/).length)
+}
+
+interface DragHandleBinding {
+  attributes?: DraggableAttributes
+  listeners?: DraggableSyntheticListeners
+  setActivatorNodeRef?: (element: HTMLElement | null) => void
+}
+
+interface MacroTaskCardProps {
+  task: MacroTask
+  isExpanded: boolean
+  isOverlay?: boolean
+  isPlaceholder?: boolean
+  orderLabel: string
+  dragHandle?: DragHandleBinding
+  onDeleteTask: (taskId: string) => void
+  onToggleComplete: (taskId: string) => void
+  onToggleExpanded: (taskId: string) => void
+  onUpdateTask: (taskId: string, patch: Partial<MacroTask>) => void
+}
+
+function MacroTaskCard({
+  task,
+  isExpanded,
+  isOverlay = false,
+  isPlaceholder = false,
+  orderLabel,
+  dragHandle,
+  onDeleteTask,
+  onToggleComplete,
+  onToggleExpanded,
+  onUpdateTask,
+}: MacroTaskCardProps) {
+  const detailText = task.detail?.trim() ?? ''
+  const estimatedDetailRows = estimateDetailRows(detailText)
+  const canExpand = estimatedDetailRows > collapsedDetailRows
+  const detailRows = isExpanded
+    ? Math.min(expandedDetailRows, estimatedDetailRows)
+    : Math.min(collapsedDetailRows, estimatedDetailRows)
+
+  return (
+    <article
+      className={`macro-item ${task.completed ? 'is-complete' : ''} ${
+        isExpanded ? 'is-expanded' : ''
+      } ${isOverlay ? 'drag-overlay' : ''} ${
+        isPlaceholder ? 'is-placeholder' : ''
+      }`}
+    >
+      <span className="macro-order" aria-label={`当前排序 ${orderLabel}`}>
+        {orderLabel}
+      </span>
+      <button
+        className="drag-handle"
+        ref={dragHandle?.setActivatorNodeRef}
+        type="button"
+        aria-label={`拖拽排序：${task.title}`}
+        tabIndex={isOverlay ? -1 : undefined}
+        {...(dragHandle?.attributes ?? {})}
+        {...(dragHandle?.listeners ?? {})}
+      >
+        <GripVertical size={18} aria-hidden="true" />
+      </button>
+      <button
+        className="complete-toggle"
+        onClick={() => onToggleComplete(task.id)}
+        type="button"
+        title={task.completed ? '重新进入排期' : '标记完成'}
+        tabIndex={isOverlay ? -1 : undefined}
+      >
+        {task.completed ? <Check size={16} /> : null}
+      </button>
+      <div className="macro-body">
+        <input
+          className="macro-title"
+          value={task.title}
+          onChange={(event) => onUpdateTask(task.id, { title: event.target.value })}
+          aria-label={`${task.title} 标题`}
+          readOnly={isOverlay}
+          tabIndex={isOverlay ? -1 : undefined}
+        />
+        <textarea
+          className={`macro-detail ${isExpanded ? 'is-expanded' : ''}`}
+          rows={detailRows}
+          value={task.detail ?? ''}
+          onChange={(event) => onUpdateTask(task.id, { detail: event.target.value })}
+          placeholder="补充该宏观任务的拆解细节"
+          aria-label={`${task.title} 详细内容`}
+          readOnly={isOverlay}
+          tabIndex={isOverlay ? -1 : undefined}
+          wrap="off"
+        />
+        <div className="path-line">
+          <span className={`subject-pill subject-${task.subjectId}`}>
+            {subjectById[task.subjectId].name}
+          </span>
+          <span>{moduleById[task.moduleId]?.name ?? '未归档'}</span>
+        </div>
+        {canExpand ? (
+          <button
+            className="macro-expand"
+            type="button"
+            onClick={() => onToggleExpanded(task.id)}
+            aria-expanded={isExpanded}
+            title={isExpanded ? '收起详细内容' : '展开详细内容'}
+            tabIndex={isOverlay ? -1 : undefined}
+          >
+            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {isExpanded ? '收起详情' : '展开详情'}
+          </button>
+        ) : null}
+      </div>
+      <input
+        className="day-input"
+        min={1}
+        max={240}
+        type="number"
+        value={task.estimatedDays}
+        onChange={(event) =>
+          onUpdateTask(task.id, {
+            estimatedDays: clampTaskDays(Number(event.target.value)),
+          })
+        }
+        aria-label={`${task.title} 预估任务日`}
+        readOnly={isOverlay}
+        tabIndex={isOverlay ? -1 : undefined}
+      />
+      <button
+        className="ghost-icon"
+        onClick={() => onDeleteTask(task.id)}
+        type="button"
+        title="删除宏观任务"
+        tabIndex={isOverlay ? -1 : undefined}
+      >
+        <Trash2 size={17} />
+      </button>
+    </article>
+  )
+}
+
+function SortableMacroTaskCard(props: MacroTaskCardProps) {
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
+    id: props.task.id,
+    transition: {
+      duration: 320,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    },
+  })
+
+  const style: CSSProperties = {
+    transform: isDragging ? undefined : DndCSS.Transform.toString(transform),
+    transition: isDragging ? undefined : transition,
+  }
+
+  return (
+    <div
+      className={`macro-sortable ${isDragging ? 'is-placeholder' : ''}`}
+      ref={setNodeRef}
+      style={style}
+    >
+      <MacroTaskCard
+        {...props}
+        dragHandle={{ attributes, listeners, setActivatorNodeRef }}
+        isPlaceholder={isDragging}
+      />
+    </div>
+  )
+}
 
 export function StrategicPlanner() {
   const macroTasks = usePlannerStore((state) => state.macroTasks)
@@ -36,19 +242,64 @@ export function StrategicPlanner() {
   const resetDemoData = usePlannerStore((state) => state.resetDemoData)
 
   const [title, setTitle] = useState('')
+  const [detail, setDetail] = useState('')
   const [days, setDays] = useState(6)
   const [subjectId, setSubjectId] = useState<SubjectId>(defaultSubject)
   const [moduleId, setModuleId] = useState(
     getModulesForSubject(defaultSubject)[0].id,
   )
-  const [dragId, setDragId] = useState<string | null>(null)
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set())
+  const [subjectFilter, setSubjectFilter] = useState<SubjectId | null>(null)
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  )
 
   const today = getTodayISO()
   const summary = useMemo(
     () => buildSchedule(macroTasks, microTasks, today, EXAM_DEADLINE),
     [macroTasks, microTasks, today],
   )
-  const orderedTasks = [...macroTasks].sort((left, right) => left.order - right.order)
+  const orderedTasks = useMemo(
+    () => [...macroTasks].sort((left, right) => left.order - right.order),
+    [macroTasks],
+  )
+  const filteredTasks = useMemo(
+    () =>
+      subjectFilter === null
+        ? orderedTasks
+        : orderedTasks.filter((task) => task.subjectId === subjectFilter),
+    [orderedTasks, subjectFilter],
+  )
+  const sortableIds = filteredTasks.map((task) => task.id)
+  const taskOrderLabels = useMemo(
+    () =>
+      new Map(
+        filteredTasks.map((task, index) => [
+          task.id,
+          String(index + 1).padStart(2, '0'),
+        ]),
+      ),
+    [filteredTasks],
+  )
+  const activeTask = activeDragId
+    ? orderedTasks.find((task) => task.id === activeDragId)
+    : undefined
+  const activeTaskOrderLabel = activeTask
+    ? taskOrderLabels.get(activeTask.id) ??
+      String(orderedTasks.findIndex((task) => task.id === activeTask.id) + 1).padStart(
+        2,
+        '0',
+      )
+    : '00'
   const closedTasks = orderedTasks.filter((task) => task.completed).length
 
   const handleSubjectChange = (nextSubjectId: SubjectId) => {
@@ -63,6 +314,7 @@ export function StrategicPlanner() {
 
     addMacroTask({
       title: trimmedTitle,
+      detail: detail.trim(),
       subjectId,
       moduleId,
       estimatedDays: clampTaskDays(days),
@@ -70,7 +322,37 @@ export function StrategicPlanner() {
     })
 
     setTitle('')
+    setDetail('')
     setDays(6)
+  }
+
+  const toggleExpandedTask = (taskId: string) => {
+    setExpandedTaskIds((current) => {
+      const next = new Set(current)
+      if (next.has(taskId)) {
+        next.delete(taskId)
+      } else {
+        next.add(taskId)
+      }
+      return next
+    })
+  }
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id))
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveDragId(null)
+
+    if (!over || active.id === over.id) return
+
+    reorderMacroTask(
+      String(active.id),
+      String(over.id),
+      subjectFilter ?? undefined,
+    )
   }
 
   const summaryTone = summary.overflowDays > 0 ? 'danger' : 'stable'
@@ -107,11 +389,19 @@ export function StrategicPlanner() {
         <aside className="backlog-panel">
           <form className="macro-entry" onSubmit={handleSubmit}>
             <label className="field">
-              <span>L2 宏观任务</span>
+              <span>L2 标题</span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="例如：408 操作系统同步互斥专题"
+                placeholder="例如：极限计算综合"
+              />
+            </label>
+            <label className="field macro-detail-field">
+              <span>详细内容</span>
+              <textarea
+                value={detail}
+                onChange={(event) => setDetail(event.target.value)}
+                placeholder="例如：等价替换/泰勒精度/七种未定式盲区扫描与错题归因"
               />
             </label>
             <div className="inline-fields">
@@ -175,7 +465,19 @@ export function StrategicPlanner() {
 
           <div className="subject-stats">
             {summary.subjectStats.map((stat) => (
-              <div className="subject-stat" key={stat.subjectId}>
+              <button
+                className={`subject-stat ${
+                  subjectFilter === stat.subjectId ? 'is-active' : ''
+                }`}
+                key={stat.subjectId}
+                onClick={() =>
+                  setSubjectFilter((current) =>
+                    current === stat.subjectId ? null : stat.subjectId,
+                  )
+                }
+                type="button"
+                aria-pressed={subjectFilter === stat.subjectId}
+              >
                 <span className={`subject-pill subject-${stat.subjectId}`}>
                   {subjectById[stat.subjectId].name}
                 </span>
@@ -183,73 +485,60 @@ export function StrategicPlanner() {
                 <small>
                   {stat.taskCount} 个 L2 / {stat.totalWorkUnits} 个任务日
                 </small>
-              </div>
+              </button>
             ))}
           </div>
 
-          <div className="macro-list">
-            {orderedTasks.map((task) => (
-              <article
-                key={task.id}
-                className={`macro-item ${task.completed ? 'is-complete' : ''} ${
-                  dragId === task.id ? 'is-dragging' : ''
-                }`}
-                draggable
-                onDragStart={() => setDragId(task.id)}
-                onDragEnd={() => setDragId(null)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
-                  if (dragId) reorderMacroTask(dragId, task.id)
-                  setDragId(null)
-                }}
-              >
-                <GripVertical className="drag-handle" size={18} aria-hidden="true" />
-                <button
-                  className="complete-toggle"
-                  onClick={() => toggleMacroTask(task.id)}
-                  type="button"
-                  title={task.completed ? '重新进入排期' : '标记完成'}
-                >
-                  {task.completed ? <Check size={16} /> : null}
-                </button>
-                <div className="macro-body">
-                  <input
-                    value={task.title}
-                    onChange={(event) =>
-                      updateMacroTask(task.id, { title: event.target.value })
-                    }
-                  />
-                  <div className="path-line">
-                    <span className={`subject-pill subject-${task.subjectId}`}>
-                      {subjectById[task.subjectId].name}
-                    </span>
-                    <span>{moduleById[task.moduleId]?.name ?? '未归档'}</span>
-                  </div>
-                </div>
-                <input
-                  className="day-input"
-                  min={1}
-                  max={240}
-                  type="number"
-                  value={task.estimatedDays}
-                  onChange={(event) =>
-                    updateMacroTask(task.id, {
-                      estimatedDays: clampTaskDays(Number(event.target.value)),
-                    })
-                  }
-                  aria-label={`${task.title} 预估任务日`}
+          <DndContext
+            collisionDetection={closestCenter}
+            onDragCancel={() => setActiveDragId(null)}
+            onDragEnd={handleDragEnd}
+            onDragStart={handleDragStart}
+            sensors={sensors}
+          >
+            <SortableContext
+              items={sortableIds}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="macro-list" key={subjectFilter ?? 'all'}>
+                {filteredTasks.length === 0 ? (
+                  <div className="empty-state macro-empty">当前科目暂无 L2</div>
+                ) : (
+                  filteredTasks.map((task) => (
+                    <SortableMacroTaskCard
+                      isExpanded={expandedTaskIds.has(task.id)}
+                      key={task.id}
+                      orderLabel={taskOrderLabels.get(task.id) ?? '00'}
+                      onDeleteTask={deleteMacroTask}
+                      onToggleComplete={toggleMacroTask}
+                      onToggleExpanded={toggleExpandedTask}
+                      onUpdateTask={updateMacroTask}
+                      task={task}
+                    />
+                  ))
+                )}
+              </div>
+            </SortableContext>
+            <DragOverlay
+              dropAnimation={{
+                duration: 320,
+                easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            >
+              {activeTask ? (
+                <MacroTaskCard
+                  isExpanded={expandedTaskIds.has(activeTask.id)}
+                  isOverlay
+                  orderLabel={activeTaskOrderLabel}
+                  onDeleteTask={deleteMacroTask}
+                  onToggleComplete={toggleMacroTask}
+                  onToggleExpanded={toggleExpandedTask}
+                  onUpdateTask={updateMacroTask}
+                  task={activeTask}
                 />
-                <button
-                  className="ghost-icon"
-                  onClick={() => deleteMacroTask(task.id)}
-                  type="button"
-                  title="删除宏观任务"
-                >
-                  <Trash2 size={17} />
-                </button>
-              </article>
-            ))}
-          </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
 
           <button className="text-button" type="button" onClick={resetDemoData}>
             <RotateCcw size={16} />

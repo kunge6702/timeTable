@@ -20,6 +20,7 @@ export interface MacroTask {
   subjectId: SubjectId
   moduleId: string
   title: string
+  detail?: string
   estimatedDays: number
   order: number
   completed: boolean
