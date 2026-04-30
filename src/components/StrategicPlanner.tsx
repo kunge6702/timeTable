@@ -40,7 +40,7 @@ import {
 } from '../data/catalog'
 import { usePlannerStore } from '../store/plannerStore'
 import type { MacroTask, SubjectId } from '../types'
-import { formatZhDate, getTodayISO } from '../utils/date'
+import { addDaysISO, formatZhDate, getTodayISO } from '../utils/date'
 import { buildSchedule } from '../utils/schedule'
 import { Heatmap } from './Heatmap'
 
@@ -51,6 +51,7 @@ const clampTaskDays = (value: number) =>
 
 const collapsedDetailRows = 1
 const expandedDetailRows = 6
+const getDefaultStartDate = () => addDaysISO(getTodayISO(), 1)
 
 const estimateDetailRows = (detail: string) => {
   if (!detail.trim()) return 1
@@ -167,6 +168,17 @@ function MacroTaskCard({
         ) : null}
       </div>
       <input
+        className="start-date-input"
+        type="date"
+        value={task.startDate}
+        onChange={(event) =>
+          onUpdateTask(task.id, { startDate: event.target.value })
+        }
+        aria-label={`${task.title} 起始日`}
+        readOnly={isOverlay}
+        tabIndex={isOverlay ? -1 : undefined}
+      />
+      <input
         className="day-input"
         min={1}
         max={240}
@@ -243,6 +255,7 @@ export function StrategicPlanner() {
 
   const [title, setTitle] = useState('')
   const [detail, setDetail] = useState('')
+  const [startDate, setStartDate] = useState(getDefaultStartDate)
   const [days, setDays] = useState(6)
   const [subjectId, setSubjectId] = useState<SubjectId>(defaultSubject)
   const [moduleId, setModuleId] = useState(
@@ -311,6 +324,7 @@ export function StrategicPlanner() {
     event.preventDefault()
     const trimmedTitle = title.trim()
     if (!trimmedTitle) return
+    const normalizedStartDate = startDate || getDefaultStartDate()
 
     addMacroTask({
       title: trimmedTitle,
@@ -318,11 +332,13 @@ export function StrategicPlanner() {
       subjectId,
       moduleId,
       estimatedDays: clampTaskDays(days),
+      startDate: normalizedStartDate,
       notes: '',
     })
 
     setTitle('')
     setDetail('')
+    setStartDate(getDefaultStartDate())
     setDays(6)
   }
 
@@ -433,6 +449,15 @@ export function StrategicPlanner() {
                   ))}
                 </select>
               </label>
+              <label className="field start-date-field">
+                <span>起始日</span>
+                <input
+                  min={today}
+                  type="date"
+                  value={startDate}
+                  onChange={(event) => setStartDate(event.target.value)}
+                />
+              </label>
               <label className="field days-field">
                 <span>任务日</span>
                 <input
@@ -448,7 +473,10 @@ export function StrategicPlanner() {
             </div>
             <div className="lane-explain">
               <strong>四科固定通道</strong>
-              <span>每天数学、英语、政治、408 各推进 1 个当前 L2；单科内部按 order 串行。</span>
+              <span>
+                起始日作为当前 L2 的最早开工日；每天数学、英语、政治、408
+                各推进 1 个当前 L2，单科内部按 order 串行。
+              </span>
             </div>
             <button className="primary-button" type="submit" title="新增宏观任务">
               <Plus size={18} />

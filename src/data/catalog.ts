@@ -1,4 +1,5 @@
 import type { MacroTask, SubjectDefinition, SubjectId } from '../types'
+import { addDaysISO, getTodayISO } from '../utils/date'
 
 export const EXAM_DEADLINE = '2026-12-19'
 
@@ -256,21 +257,30 @@ const getMathModuleIdFromTitle = (title: string) => {
 }
 
 export const createDefaultMacroTasks = (): MacroTask[] =>
-  [...importedMathMacroTasks]
-    .sort((left, right) => left.order - right.order)
-    .map((task) => {
-      const { title, detail } = splitMacroTaskText(task.title)
+  (() => {
+    const nextStartBySubject = new Map<SubjectId, string>()
+    const defaultStartDate = addDaysISO(getTodayISO(), 1)
 
-      return {
-        id: task.id,
-        subjectId: getSubjectIdFromImport(task.subject),
-        moduleId: getMathModuleIdFromTitle(task.title),
-        title,
-        detail,
-        estimatedDays: task.estimatedDays,
-        order: task.order,
-        completed: false,
-        dependencies: [],
-        createdAt: new Date().toISOString(),
-      }
-    })
+    return [...importedMathMacroTasks]
+      .sort((left, right) => left.order - right.order)
+      .map((task) => {
+        const subjectId = getSubjectIdFromImport(task.subject)
+        const startDate = nextStartBySubject.get(subjectId) ?? defaultStartDate
+        nextStartBySubject.set(subjectId, addDaysISO(startDate, task.estimatedDays))
+        const { title, detail } = splitMacroTaskText(task.title)
+
+        return {
+          id: task.id,
+          subjectId,
+          moduleId: getMathModuleIdFromTitle(task.title),
+          title,
+          detail,
+          estimatedDays: task.estimatedDays,
+          startDate,
+          order: task.order,
+          completed: false,
+          dependencies: [],
+          createdAt: new Date().toISOString(),
+        }
+      })
+  })()

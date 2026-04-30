@@ -76,6 +76,7 @@ export const buildSchedule = (
     .filter((task) => !task.completed && task.estimatedDays > 0)
     .sort((left, right) => left.order - right.order)
   const assignments = new Map<string, SubjectAssignments>()
+  const defaultStartDate = addDaysISO(today, 1)
 
   const subjectStats = SUBJECT_LANES.map((subjectId): SubjectScheduleStat => {
     const subjectTasks = openMacroTasks.filter(
@@ -85,21 +86,32 @@ export const buildSchedule = (
       (sum, task) => sum + task.estimatedDays,
       0,
     )
-    let cursor = addDaysISO(today, 1)
+    let cursor: string | undefined
+    let firstScheduledDate: string | undefined
+    let finishDate = today
 
     subjectTasks.forEach((task) => {
+      cursor = cursor
+        ? maxISO(cursor, task.startDate || defaultStartDate)
+        : task.startDate || defaultStartDate
+      firstScheduledDate = firstScheduledDate ?? cursor
+
       for (let index = 0; index < task.estimatedDays; index += 1) {
         assignTaskToDate(assignments, cursor, subjectId, task)
         cursor = addDaysISO(cursor, 1)
       }
+
+      finishDate = addDaysISO(cursor, -1)
     })
 
     return {
       subjectId,
       taskCount: subjectTasks.length,
       totalWorkUnits,
-      plannedCalendarDays: totalWorkUnits,
-      finishDate: totalWorkUnits > 0 ? addDaysISO(cursor, -1) : today,
+      plannedCalendarDays: firstScheduledDate
+        ? diffDaysISO(firstScheduledDate, finishDate) + 1
+        : 0,
+      finishDate: totalWorkUnits > 0 ? finishDate : today,
     }
   })
 

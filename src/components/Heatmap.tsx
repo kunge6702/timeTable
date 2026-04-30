@@ -19,6 +19,9 @@ const laneLabels: Record<SubjectId, string> = {
 
 const getCellTone = (cell: HeatmapCell) => {
   if (cell.isDeadline) return 'deadline'
+  if (cell.assignedTasks.length > 0 && cell.status !== 'past') {
+    return 'planned subject-grid'
+  }
   if (cell.status === 'future') {
     return cell.assignedTasks.length > 0 ? 'planned subject-grid' : 'future'
   }

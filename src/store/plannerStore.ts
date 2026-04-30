@@ -9,6 +9,7 @@ type NewMacroTask = Omit<
   MacroTask,
   'id' | 'order' | 'completed' | 'dependencies' | 'createdAt'
 >
+type PersistedMacroTask = Omit<MacroTask, 'startDate'> & { startDate?: string }
 
 interface PlannerState {
   view: WorkspaceView
@@ -109,10 +110,33 @@ const createInitialState = () => ({
   microTasks: createDefaultMicroTasks(),
 })
 
-const sanitizeMigratedMacroTasks = (macroTasks?: MacroTask[]) => {
+const addFallbackStartDates = (macroTasks: PersistedMacroTask[]): MacroTask[] => {
+  const defaultStartDate = addDaysISO(getTodayISO(), 1)
+  const fallbackStartById = new Map<string, string>()
+  const nextStartBySubject = new Map<SubjectId, string>()
+  const orderedTasks = [...macroTasks].sort(
+    (left, right) => left.order - right.order,
+  )
+
+  orderedTasks.forEach((task) => {
+    const startDate = nextStartBySubject.get(task.subjectId) ?? defaultStartDate
+    fallbackStartById.set(task.id, startDate)
+    nextStartBySubject.set(
+      task.subjectId,
+      addDaysISO(startDate, task.estimatedDays),
+    )
+  })
+
+  return macroTasks.map((task) => ({
+    ...task,
+    startDate: task.startDate || fallbackStartById.get(task.id) || defaultStartDate,
+  }))
+}
+
+const sanitizeMigratedMacroTasks = (macroTasks?: PersistedMacroTask[]) => {
   if (!macroTasks) return createDefaultMacroTasks()
 
-  return macroTasks.map((task) => {
+  const normalizedTasks = macroTasks.map((task) => {
     if (task.detail !== undefined) return task
 
     const { title, detail } = splitMacroTaskText(task.title)
@@ -122,6 +146,8 @@ const sanitizeMigratedMacroTasks = (macroTasks?: MacroTask[]) => {
       detail,
     }
   })
+
+  return addFallbackStartDates(normalizedTasks)
 }
 
 const sanitizeMigratedMicroTasks = (microTasks?: MicroTask[]) => {
@@ -163,6 +189,13 @@ const migratePlannerState = (persistedState: unknown, version: number) => {
   }
 
   if (version < 3) {
+    nextState = {
+      ...nextState,
+      macroTasks: sanitizeMigratedMacroTasks(nextState.macroTasks),
+    }
+  }
+
+  if (version < 4) {
     nextState = {
       ...nextState,
       macroTasks: sanitizeMigratedMacroTasks(nextState.macroTasks),
@@ -277,7 +310,7 @@ export const usePlannerStore = create<PlannerState>()(
     {
       name: 'exam-planner-state-v1',
       storage: createJSONStorage(() => localStorage),
-      version: 3,
+      version: 4,
       migrate: migratePlannerState,
     },
   ),

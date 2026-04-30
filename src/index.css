@@ -525,7 +525,7 @@ h2 {
 
 .inline-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr 92px;
+  grid-template-columns: 1fr 1fr 150px 92px;
   gap: 10px;
 }
 
@@ -549,6 +549,8 @@ h2 {
   line-height: 1.45;
 }
 
+.start-date-field input,
+.start-date-input,
 .days-field input,
 .day-input {
   font-family: var(--mono);
@@ -641,11 +643,11 @@ h2 {
 
 .macro-item {
   position: relative;
-  grid-template-columns: 38px 18px 26px minmax(0, 1fr) 74px 34px;
+  grid-template-columns: 38px 18px 26px minmax(0, 1fr) 126px 74px 34px;
   grid-template-areas:
-    "order drag complete title days delete"
-    "order drag complete detail detail detail"
-    "order drag complete path expand expand";
+    "order drag complete title start days delete"
+    "order drag complete detail detail detail detail"
+    "order drag complete path path expand expand";
   align-items: start;
   column-gap: 12px;
   row-gap: 8px;
@@ -779,6 +781,7 @@ h2 {
 
 .macro-body input,
 .macro-body textarea,
+.start-date-input,
 .day-input {
   cursor: text;
 }
@@ -804,6 +807,12 @@ h2 {
 .macro-expand:hover {
   border-color: var(--blueprint);
   background: #eef5f5;
+}
+
+.start-date-input {
+  grid-area: start;
+  min-height: 36px;
+  padding: 0 8px;
 }
 
 .day-input {
@@ -1171,6 +1180,7 @@ h2 {
     grid-template-columns: 32px 18px 26px minmax(0, 1fr) 58px 32px;
     grid-template-areas:
       "order drag complete title days delete"
+      "order drag complete start start start"
       "order drag complete detail detail detail"
       "order drag complete path expand expand";
     column-gap: 8px;

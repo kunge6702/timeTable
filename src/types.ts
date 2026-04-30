@@ -22,6 +22,7 @@ export interface MacroTask {
   title: string
   detail?: string
   estimatedDays: number
+  startDate: string
   order: number
   completed: boolean
   dependencies: string[]
