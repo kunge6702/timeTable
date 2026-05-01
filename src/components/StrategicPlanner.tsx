@@ -42,6 +42,7 @@ import { usePlannerStore } from '../store/plannerStore'
 import type { MacroTask, SubjectId } from '../types'
 import { addDaysISO, formatZhDate, getTodayISO } from '../utils/date'
 import { buildSchedule } from '../utils/schedule'
+import { ConfirmDialog } from './ConfirmDialog'
 import { Heatmap } from './Heatmap'
 
 const defaultSubject: SubjectId = 'math'
@@ -264,6 +265,7 @@ export function StrategicPlanner() {
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set())
   const [subjectFilter, setSubjectFilter] = useState<SubjectId | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const [isResetConfirmOpen, setResetConfirmOpen] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -411,6 +413,7 @@ export function StrategicPlanner() {
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="例如：极限计算综合"
               />
+              <small className="field-hint">标题只写短名称，长说明全部放到“详细内容”里。</small>
             </label>
             <label className="field macro-detail-field">
               <span>详细内容</span>
@@ -568,7 +571,11 @@ export function StrategicPlanner() {
             </DragOverlay>
           </DndContext>
 
-          <button className="text-button" type="button" onClick={resetDemoData}>
+          <button
+            className="text-button danger-button"
+            type="button"
+            onClick={() => setResetConfirmOpen(true)}
+          >
             <RotateCcw size={16} />
             重置样例
           </button>
@@ -604,6 +611,18 @@ export function StrategicPlanner() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={isResetConfirmOpen}
+        title="重置为样例数据？"
+        description="这会清空当前本地保存的任务与记录，恢复成初始样例。这个操作不可撤销。"
+        confirmLabel="确认重置"
+        onClose={() => setResetConfirmOpen(false)}
+        onConfirm={() => {
+          resetDemoData()
+          setResetConfirmOpen(false)
+        }}
+      />
     </section>
   )
 }

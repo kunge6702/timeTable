@@ -1,8 +1,19 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { createDefaultMacroTasks, splitMacroTaskText } from '../data/catalog'
-import type { MacroTask, MicroTask, SubjectId, WorkspaceView } from '../types'
+import type {
+  MacroTask,
+  MicroTask,
+  PlannerImportMode,
+  SubjectId,
+  WorkspaceView,
+} from '../types'
 import { addDaysISO, getTodayISO } from '../utils/date'
+import {
+  mergePlannerImportData,
+  parsePlannerImportPayload,
+  type NormalizedPlannerImportData,
+} from '../utils/plannerImport'
 
 type NewMicroTask = Omit<MicroTask, 'id' | 'createdAt' | 'completed'>
 type NewMacroTask = Omit<
@@ -29,6 +40,10 @@ interface PlannerState {
     targetId: string,
     subjectId?: SubjectId,
   ) => void
+  importPlannerData: (
+    payload: unknown,
+    mode?: PlannerImportMode,
+  ) => NormalizedPlannerImportData
   resetDemoData: () => void
 }
 
@@ -304,6 +319,21 @@ export const usePlannerStore = create<PlannerState>()(
         )
 
         set({ macroTasks: resequence(merged) })
+      },
+      importPlannerData: (payload, mode = 'replace') => {
+        const imported = parsePlannerImportPayload(payload)
+        const merged = mergePlannerImportData(
+          {
+            view: get().view,
+            macroTasks: get().macroTasks,
+            microTasks: get().microTasks,
+          },
+          imported,
+          mode,
+        )
+
+        set(merged)
+        return merged
       },
       resetDemoData: () => set({ ...createInitialState(), view: 'execution' }),
     }),

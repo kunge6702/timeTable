@@ -1,6 +1,7 @@
 export type SubjectId = 'math' | 'english' | 'politics' | 'cs408'
 
 export type WorkspaceView = 'execution' | 'strategy'
+export type PlannerImportMode = 'replace' | 'append'
 
 export interface ModuleDefinition {
   id: string
@@ -41,6 +42,41 @@ export interface MicroTask {
   reviewNote: string
   completed: boolean
   createdAt: string
+}
+
+export interface ImportedMacroTaskInput {
+  id?: string
+  subjectId: SubjectId
+  moduleId: string
+  title: string
+  detail?: string
+  estimatedDays: number
+  startDate?: string
+  order?: number
+  completed?: boolean
+  dependencies?: string[]
+  createdAt?: string
+  notes?: string
+}
+
+export interface ImportedMicroTaskInput {
+  id?: string
+  date: string
+  subjectId: SubjectId
+  moduleId: string
+  macroTaskId?: string
+  title: string
+  outcome?: string
+  reviewNote?: string
+  completed?: boolean
+  createdAt?: string
+}
+
+export interface PlannerImportPayload {
+  version?: number
+  view?: WorkspaceView
+  macroTasks: ImportedMacroTaskInput[]
+  microTasks?: ImportedMicroTaskInput[]
 }
 
 export type SubjectAssignments = Partial<Record<SubjectId, MacroTask>>
