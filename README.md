@@ -1,24 +1,39 @@
 # POSTGRAD OPS
 
-一个本地优先的考研项目管理 SPA。它把 L0 学科、L1 模块、L2 宏观任务、L3 原子任务放进同一个轻量系统里，用今日执行台处理每天的动作，用战略规划台做四科并行排期沙盘和 deadline 碰撞检测。
+一个本地优先的考研任务规划 SPA。它把 `L0 学科`、`L1 模块`、`L2 宏观任务`、`L3 原子任务` 放进同一套轻量系统里，方便你按天执行、按学科排期，并用热力图观察整体进度。
 
 ## 功能
 
-- 今日看板：快速录入 L3 原子任务，绑定 L0/L1/L2，记录预期效果和 Error Tracking。
-- 战略规划：维护 L2 宏观任务 backlog，支持拖拽调整顺序、修改预估任务日、标记完成。
-- 四科并行：数学、英语、政治、408 是四条固定通道，每天各推进 1 个当前 L2。
-- 热力图：每个未来日期固定分成 4 个象限，每门科目占一个 1/4 格子。
-- 大限告警：以 `2026-12-19` 为初试警戒线，越界的科目通道会在热力图中标红。
-- 本地持久化：使用 Zustand + localStorage，数据保存在当前浏览器。
+- 今日看板：快速录入和维护当天的 `L3` 原子任务。
+- 战略规划：维护 `L2` 宏观任务 backlog，支持排序、排期、标记完成。
+- 四科并行：数学、英语、政治、`408` 分通道推进。
+- 热力图：按日期展示完成度、学科占用和 deadline 风险。
+- 本地持久化：使用 Zustand + `localStorage`，数据保存在当前浏览器。
+- JSON 导入导出：支持一键导入 AI 生成的计划，也支持导出备份。
 
 ## 技术栈
 
 - React 19
 - TypeScript
-- Vite
-- Tailwind CSS
+- Vite 8
 - Zustand
-- lucide-react
+- `@dnd-kit/*`
+- `lucide-react`
+
+## 环境要求
+
+- Node.js：推荐 `22.12+`，最低满足 Vite 官方要求的 `20.19+`
+- npm：随 Node.js 安装即可
+- 不需要额外环境变量
+
+先确认本机版本：
+
+```bash
+node -v
+npm -v
+```
+
+如果 `node -v` 低于 `20.19.0`，先升级 Node.js 再安装依赖。
 
 ## 本地运行
 
@@ -27,26 +42,64 @@ npm install
 npm run dev
 ```
 
-构建检查：
+默认访问地址通常是：
+
+```text
+http://127.0.0.1:5173/
+```
+
+## 构建与检查
 
 ```bash
 npm run build
 npm run lint
 ```
 
+## 常见问题
+
+### 1. `You are using Node.js 20.14.0...`
+
+这是 Vite 8 的版本提示，不是业务代码报错。解决方式是把 Node.js 升级到：
+
+- `20.19.0` 或更高
+- 或 `22.12.0` 或更高
+
+### 2. Windows 下启动时报 `spawn EPERM`
+
+如果是在受限终端、IDE 沙箱或特殊权限环境里运行，Vite 可能无法正常拉起子进程。优先在本机常规终端里执行：
+
+```bash
+npm run dev
+npm run build
+```
+
+### 3. 是否需要重新安装依赖
+
+需要。尤其是在以下情况：
+
+- 升级了 Node.js 版本
+- 切换过项目依赖
+- 删除过 `node_modules`
+
+重新安装即可：
+
+```bash
+npm install
+```
+
 ## 排期模型
 
-核心类型在 `src/types.ts`：
+核心类型位于 `src/types.ts`：
 
-- `SubjectDefinition`：L0 学科和 L1 模块目录
-- `MacroTask`：L2 宏观任务，含预估任务日、排序、完成状态
-- `MicroTask`：L3 原子任务，含当日日期、Outcome、复盘备注
-- `HeatmapCell`：热力图格点，含历史完成率、四科分配表和越界科目
+- `SubjectDefinition`：L0 学科与 L1 模块目录
+- `MacroTask`：L2 宏观任务，包含预估天数、顺序、完成状态等
+- `MicroTask`：L3 原子任务，包含日期、结果、复盘备注等
+- `HeatmapCell`：热力图格点，包含完成率、学科分配和越界状态
 
-排期引擎在 `src/utils/schedule.ts`。它从明天开始按科目独立排队：同一科目内部按 `MacroTask.order` 串行推进，不同科目之间每天并行推进。
+排期引擎位于 `src/utils/schedule.ts`。它会从次日开始，按学科分别排队：同一学科内部按 `MacroTask.order` 串行推进，不同学科之间并行推进。
 
-例子：数学一有 5 个任务，每个任务 5 天，数学通道需要 25 个自然日；408 有 6 个任务，每个任务 5 天，408 通道需要 30 个自然日。因为它们分别占每天格子的 1/4，并不是互相抢同一个整天，所以整体完工日期取四科通道的最大值，也就是约 30 天，而不是 55 天。
-## 一键导入
+## JSON 导入说明
 
-- 点击顶部的「一键导入」可粘贴或选择 AI 生成的 JSON 文件，导入会覆盖当前本地数据。
-- 说明文档见 [docs/planner-json-import-guide.md](docs/planner-json-import-guide.md)。
+导入说明见：
+
+- [docs/planner-json-import-guide.md](docs/planner-json-import-guide.md)

@@ -80,7 +80,7 @@ function App() {
         {view === 'execution' ? <ExecutionDashboard /> : <StrategicPlanner />}
       </main>
 
-      <ImportDialog open={isImportOpen} onClose={() => setImportOpen(false)} />
+      {isImportOpen ? <ImportDialog open={isImportOpen} onClose={() => setImportOpen(false)} /> : null}
     </>
   )
 }

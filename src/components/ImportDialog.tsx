@@ -65,19 +65,7 @@ export function ImportDialog({ open, onClose }: ImportDialogProps) {
   }
 
   useEffect(() => {
-    if (!open) {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current)
-        closeTimerRef.current = null
-      }
-      setRawJson('')
-      setFileName('')
-      setError('')
-      setStatus('')
-      setIsBusy(false)
-      setImportMode('replace')
-      return
-    }
+    if (!open) return
 
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
