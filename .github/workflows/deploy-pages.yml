@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - deploy/github-pages
   workflow_dispatch:
 
 env:
