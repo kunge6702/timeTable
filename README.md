@@ -50,3 +50,10 @@ npm run lint
 
 - 点击顶部的「一键导入」可粘贴或选择 AI 生成的 JSON 文件，导入会覆盖当前本地数据。
 - 说明文档见 [docs/planner-json-import-guide.md](docs/planner-json-import-guide.md)。
+
+## GitHub Pages 部署
+
+- 本项目已配置为部署到 `https://kunge6702.github.io/timeTable/`
+- 推送到 `main` 分支会自动触发 GitHub Pages 工作流
+- `deploy/github-pages` 分支可用于准备和验证部署配置，再合并到 `main`
+- 首次启用时，请在 GitHub 仓库设置里将 `Pages` 的 `Source` 设为 `GitHub Actions`
