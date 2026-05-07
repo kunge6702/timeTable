@@ -6,6 +6,7 @@ import { SUBJECT_LANES } from '../utils/schedule'
 
 interface HeatmapProps {
   cells: HeatmapCell[]
+  onPastDateClick?: (date: string) => void
 }
 
 const rowLabels = ['一', '二', '三', '四', '五', '六', '日']
@@ -71,7 +72,7 @@ const buildTooltip = (cell: HeatmapCell) => {
   return `${date} / 空闲`
 }
 
-export function Heatmap({ cells }: HeatmapProps) {
+export function Heatmap({ cells, onPastDateClick }: HeatmapProps) {
   const { weeks, monthLabels } = useMemo(() => {
     if (cells.length === 0) {
       return { weeks: [] as Array<Array<HeatmapCell | null>>, monthLabels: [] }
@@ -135,6 +136,13 @@ export function Heatmap({ cells }: HeatmapProps) {
                   type="button"
                   aria-label={buildTooltip(cell)}
                   data-tip={buildTooltip(cell)}
+                  onClick={() => {
+                    if (cell.status !== 'past') return
+                    onPastDateClick?.(cell.date)
+                  }}
+                  disabled={cell.status !== 'past' || !onPastDateClick}
+                  aria-disabled={cell.status !== 'past' || !onPastDateClick}
+                  data-clickable={cell.status === 'past' && onPastDateClick ? 'true' : 'false'}
                 >
                   {SUBJECT_LANES.map((subjectId) => {
                     const task = cell.assignedBySubject[subjectId]

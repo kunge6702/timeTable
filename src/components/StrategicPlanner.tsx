@@ -45,6 +45,7 @@ import { resolveMacroTaskStartDates } from '../utils/macroTaskDates'
 import { buildSchedule } from '../utils/schedule'
 import { ConfirmDialog } from './ConfirmDialog'
 import { Heatmap } from './Heatmap'
+import { HistoricalBoardDialog } from './HistoricalBoardDialog'
 
 const defaultSubject: SubjectId = 'math'
 
@@ -269,6 +270,7 @@ export function StrategicPlanner() {
   const [subjectFilter, setSubjectFilter] = useState<SubjectId | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [historyDate, setHistoryDate] = useState<string | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -608,7 +610,7 @@ export function StrategicPlanner() {
             </div>
           </div>
 
-          <Heatmap cells={summary.cells} />
+          <Heatmap cells={summary.cells} onPastDateClick={setHistoryDate} />
 
           <div className="wall-strip">
             <span>Σ 四科任务日 = {summary.totalWorkUnits}</span>
@@ -635,6 +637,13 @@ export function StrategicPlanner() {
           resetDemoData()
           setResetConfirmOpen(false)
         }}
+      />
+      <HistoricalBoardDialog
+        open={historyDate !== null}
+        date={historyDate}
+        macroTasks={macroTasks}
+        microTasks={microTasks}
+        onClose={() => setHistoryDate(null)}
       />
     </section>
   )
