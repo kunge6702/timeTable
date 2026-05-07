@@ -41,6 +41,7 @@ import {
 import { usePlannerStore } from '../store/plannerStore'
 import type { MacroTask, SubjectId } from '../types'
 import { addDaysISO, formatZhDate, getTodayISO } from '../utils/date'
+import { resolveMacroTaskStartDates } from '../utils/macroTaskDates'
 import { buildSchedule } from '../utils/schedule'
 import { ConfirmDialog } from './ConfirmDialog'
 import { Heatmap } from './Heatmap'
@@ -67,6 +68,7 @@ interface DragHandleBinding {
 
 interface MacroTaskCardProps {
   task: MacroTask
+  actualStartDate: string
   isExpanded: boolean
   isOverlay?: boolean
   isPlaceholder?: boolean
@@ -80,6 +82,7 @@ interface MacroTaskCardProps {
 
 function MacroTaskCard({
   task,
+  actualStartDate,
   isExpanded,
   isOverlay = false,
   isPlaceholder = false,
@@ -171,7 +174,7 @@ function MacroTaskCard({
       <input
         className="start-date-input"
         type="date"
-        value={task.startDate}
+        value={actualStartDate}
         onChange={(event) =>
           onUpdateTask(task.id, { startDate: event.target.value })
         }
@@ -286,6 +289,10 @@ export function StrategicPlanner() {
   const orderedTasks = useMemo(
     () => [...macroTasks].sort((left, right) => left.order - right.order),
     [macroTasks],
+  )
+  const actualStartDateByTaskId = useMemo(
+    () => resolveMacroTaskStartDates(orderedTasks, addDaysISO(today, 1)),
+    [orderedTasks, today],
   )
   const filteredTasks = useMemo(
     () =>
@@ -537,6 +544,9 @@ export function StrategicPlanner() {
                 ) : (
                   filteredTasks.map((task) => (
                     <SortableMacroTaskCard
+                      actualStartDate={
+                        actualStartDateByTaskId.get(task.id) ?? task.startDate
+                      }
                       isExpanded={expandedTaskIds.has(task.id)}
                       key={task.id}
                       orderLabel={taskOrderLabels.get(task.id) ?? '00'}
@@ -558,6 +568,9 @@ export function StrategicPlanner() {
             >
               {activeTask ? (
                 <MacroTaskCard
+                  actualStartDate={
+                    actualStartDateByTaskId.get(activeTask.id) ?? activeTask.startDate
+                  }
                   isExpanded={expandedTaskIds.has(activeTask.id)}
                   isOverlay
                   orderLabel={activeTaskOrderLabel}

@@ -9,6 +9,7 @@ import type {
   WorkspaceView,
 } from '../types'
 import { addDaysISO, getTodayISO } from '../utils/date'
+import { sortMacroTasksByOrder } from '../utils/macroTaskDates'
 import {
   mergePlannerImportData,
   parsePlannerImportPayload,
@@ -129,9 +130,7 @@ const addFallbackStartDates = (macroTasks: PersistedMacroTask[]): MacroTask[] =>
   const defaultStartDate = addDaysISO(getTodayISO(), 1)
   const fallbackStartById = new Map<string, string>()
   const nextStartBySubject = new Map<SubjectId, string>()
-  const orderedTasks = [...macroTasks].sort(
-    (left, right) => left.order - right.order,
-  )
+  const orderedTasks = sortMacroTasksByOrder(macroTasks as MacroTask[])
 
   orderedTasks.forEach((task) => {
     const startDate = nextStartBySubject.get(task.subjectId) ?? defaultStartDate
@@ -273,7 +272,7 @@ export const usePlannerStore = create<PlannerState>()(
         set((state) => ({
           macroTasks: state.macroTasks.map((task) =>
             task.id === id ? { ...task, ...patch } : task,
-          ),
+          )
         })),
       toggleMacroTask: (id) =>
         set((state) => ({
