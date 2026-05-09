@@ -3,11 +3,14 @@ import { addDaysISO, getTodayISO } from '../utils/date'
 
 export const EXAM_DEADLINE = '2026-12-19'
 
-export const SUBJECTS: SubjectDefinition[] = [
+const DEFAULT_SUBJECT_COLORS = ['#0d7a53', '#b65718', '#b7272b', '#245a9b', '#6b6fd6', '#8c5a2f']
+
+export const createDefaultSubjects = (): SubjectDefinition[] => [
   {
     id: 'math',
     name: '数学一',
     shortName: 'Math',
+    color: DEFAULT_SUBJECT_COLORS[0],
     modules: [
       { id: 'gaoshu', subjectId: 'math', name: '高数' },
       { id: 'xiandai', subjectId: 'math', name: '线代' },
@@ -19,6 +22,7 @@ export const SUBJECTS: SubjectDefinition[] = [
     id: 'english',
     name: '英语一',
     shortName: 'EN',
+    color: DEFAULT_SUBJECT_COLORS[1],
     modules: [
       { id: 'reading', subjectId: 'english', name: '阅读' },
       { id: 'writing', subjectId: 'english', name: '写作' },
@@ -30,6 +34,7 @@ export const SUBJECTS: SubjectDefinition[] = [
     id: 'politics',
     name: '政治',
     shortName: 'POL',
+    color: DEFAULT_SUBJECT_COLORS[2],
     modules: [
       { id: 'marxism', subjectId: 'politics', name: '马原' },
       { id: 'history', subjectId: 'politics', name: '史纲' },
@@ -41,6 +46,7 @@ export const SUBJECTS: SubjectDefinition[] = [
     id: 'cs408',
     name: '408',
     shortName: '408',
+    color: DEFAULT_SUBJECT_COLORS[3],
     modules: [
       { id: 'data-structure', subjectId: 'cs408', name: '数据结构' },
       { id: 'computer-organization', subjectId: 'cs408', name: '计组' },
@@ -51,18 +57,23 @@ export const SUBJECTS: SubjectDefinition[] = [
   },
 ]
 
-export const subjectById = SUBJECTS.reduce(
-  (lookup, subject) => ({ ...lookup, [subject.id]: subject }),
-  {} as Record<SubjectId, SubjectDefinition>,
-)
+export const getSubjectColor = (subjectId: SubjectId, subjects: SubjectDefinition[]) =>
+  subjects.find((subject) => subject.id === subjectId)?.color ?? DEFAULT_SUBJECT_COLORS[0]
 
-export const moduleById = SUBJECTS.flatMap((subject) => subject.modules).reduce(
-  (lookup, module) => ({ ...lookup, [module.id]: module }),
-  {} as Record<string, SubjectDefinition['modules'][number]>,
-)
+export const getSubjectLookup = (subjects: SubjectDefinition[]) =>
+  subjects.reduce(
+    (lookup, subject) => ({ ...lookup, [subject.id]: subject }),
+    {} as Record<string, SubjectDefinition>,
+  )
 
-export const getModulesForSubject = (subjectId: SubjectId) =>
-  subjectById[subjectId].modules
+export const getModuleLookup = (subjects: SubjectDefinition[]) =>
+  subjects.flatMap((subject) => subject.modules).reduce(
+    (lookup, module) => ({ ...lookup, [module.id]: module }),
+    {} as Record<string, SubjectDefinition['modules'][number]>,
+  )
+
+export const getModulesForSubject = (subjectId: SubjectId, subjects: SubjectDefinition[]) =>
+  subjects.find((subject) => subject.id === subjectId)?.modules ?? []
 
 export const splitMacroTaskText = (rawTitle: string) => {
   const normalizedTitle = rawTitle.trim().replace(/^\[[^\]]+\]\s*/, '')

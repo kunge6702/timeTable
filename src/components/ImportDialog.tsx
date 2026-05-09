@@ -40,6 +40,9 @@ const importParsePauseMs = 140
 
 export function ImportDialog({ open, onClose }: ImportDialogProps) {
   const importPlannerData = usePlannerStore((state) => state.importPlannerData)
+  const backups = usePlannerStore((state) => state.backups)
+  const restoreBackup = usePlannerStore((state) => state.restoreBackup)
+  const loadTemplate = usePlannerStore((state) => state.loadTemplate)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const closeTimerRef = useRef<number | null>(null)
@@ -181,6 +184,7 @@ export function ImportDialog({ open, onClose }: ImportDialogProps) {
               先让 AI 按说明文档生成完整 JSON，再把文件拖进来或直接粘贴。
               文件导入和粘贴导入只是输入方式，真正结果由导入模式决定。
             </p>
+            <p>当前数据仅保存在本地浏览器，建议定期导出 JSON 备份。</p>
 
             <div
               className={`import-mode-hero mode-${importMode}`}
@@ -247,6 +251,24 @@ export function ImportDialog({ open, onClose }: ImportDialogProps) {
             <button className="text-button" type="button" onClick={focusPasteArea}>
               切换到粘贴输入
             </button>
+            <button className="text-button" type="button" onClick={loadTemplate}>
+              重新加载默认模板
+            </button>
+            <div className="import-guidance__chips">
+              {backups.slice(0, 3).map((backup) => (
+                <button
+                  className="text-button"
+                  key={backup.id}
+                  type="button"
+                  onClick={() => {
+                    restoreBackup(backup.id)
+                    closeDialog()
+                  }}
+                >
+                  恢复 {new Date(backup.createdAt).toLocaleString('zh-CN')}
+                </button>
+              ))}
+            </div>
           </aside>
 
           <form className="import-form" onSubmit={handleSubmit}>

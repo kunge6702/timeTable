@@ -12,10 +12,16 @@ function App() {
   const setView = usePlannerStore((state) => state.setView)
 
   const handleExport = () => {
-    const { view: currentView, macroTasks, microTasks } = usePlannerStore.getState()
+    const {
+      view: currentView,
+      subjects,
+      macroTasks,
+      microTasks,
+    } = usePlannerStore.getState()
     const payload = {
       version: 1,
       view: currentView,
+      subjects,
       macroTasks,
       microTasks,
     }

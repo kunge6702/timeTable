@@ -1,5 +1,4 @@
-export type SubjectId = 'math' | 'english' | 'politics' | 'cs408'
-
+export type SubjectId = string
 export type WorkspaceView = 'execution' | 'strategy'
 export type PlannerImportMode = 'replace' | 'append'
 
@@ -13,6 +12,7 @@ export interface SubjectDefinition {
   id: SubjectId
   name: string
   shortName: string
+  color: string
   modules: ModuleDefinition[]
 }
 
@@ -75,8 +75,18 @@ export interface ImportedMicroTaskInput {
 export interface PlannerImportPayload {
   version?: number
   view?: WorkspaceView
+  subjects?: SubjectDefinition[]
   macroTasks: ImportedMacroTaskInput[]
   microTasks?: ImportedMicroTaskInput[]
+}
+
+export interface PlannerBackupSnapshot {
+  id: string
+  createdAt: string
+  view: WorkspaceView
+  subjects: SubjectDefinition[]
+  macroTasks: MacroTask[]
+  microTasks: MicroTask[]
 }
 
 export type SubjectAssignments = Partial<Record<SubjectId, MacroTask>>

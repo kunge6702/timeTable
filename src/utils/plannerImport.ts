@@ -1,4 +1,4 @@
-import { moduleById, subjectById } from '../data/catalog'
+import { createDefaultSubjects, getModuleLookup, getSubjectLookup } from '../data/catalog'
 import type {
   ImportedMacroTaskInput,
   ImportedMicroTaskInput,
@@ -6,6 +6,7 @@ import type {
   MicroTask,
   PlannerImportPayload,
   PlannerImportMode,
+  SubjectDefinition,
   SubjectId,
   WorkspaceView,
 } from '../types'
@@ -13,6 +14,7 @@ import { addDaysISO, getTodayISO, maxISO } from './date'
 
 export interface NormalizedPlannerImportData {
   view: WorkspaceView
+  subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
 }
@@ -26,8 +28,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 const isValidIsoDate = (value: string) =>
   isoDatePattern.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00`))
 
-const asString = (value: unknown) =>
-  typeof value === 'string' ? value.trim() : ''
+const asString = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
 const asOptionalString = (value: unknown) => {
   const text = asString(value)
@@ -45,34 +46,6 @@ const asStringArray = (value: unknown) =>
     : []
 
 const isValidDateTime = (value: string) => !Number.isNaN(Date.parse(value))
-
-const ensureSubjectId = (
-  value: unknown,
-  index: number,
-  label: '宏任务' | '微任务',
-): SubjectId => {
-  const subjectId = asString(value) as SubjectId
-  if (!subjectById[subjectId]) {
-    throw new Error(`第 ${index + 1} 条${label}的 subjectId 无效`)
-  }
-  return subjectId
-}
-
-const ensureModuleId = (
-  subjectId: SubjectId,
-  value: unknown,
-  index: number,
-  label: '宏任务' | '微任务',
-) => {
-  const moduleId = asString(value)
-  const module = moduleById[moduleId]
-
-  if (!module || module.subjectId !== subjectId) {
-    throw new Error(`第 ${index + 1} 条${label}的 moduleId 与 subjectId 不匹配`)
-  }
-
-  return moduleId
-}
 
 const ensureView = (value: unknown): WorkspaceView => {
   if (value === undefined) return 'execution'
@@ -94,10 +67,87 @@ const ensureVersion = (value: unknown) => {
 
 const generateId = (prefix: string, index: number) => `${prefix}-${index + 1}`
 
-const normalizeMacroTasks = (rawTasks: ImportedMacroTaskInput[]) => {
+const normalizeSubjects = (value: unknown): SubjectDefinition[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    return createDefaultSubjects()
+  }
+
+  const subjects = value
+    .map((item, subjectIndex) => {
+      if (!isPlainObject(item)) return null
+
+      const id = asOptionalString(item.id) ?? generateId('subject-import', subjectIndex)
+      const name = asOptionalString(item.name) ?? `科目 ${subjectIndex + 1}`
+      const shortName = asOptionalString(item.shortName) ?? name.slice(0, 8)
+      const color =
+        asOptionalString(item.color) ??
+        createDefaultSubjects()[subjectIndex % createDefaultSubjects().length].color
+      const rawModules = Array.isArray(item.modules) ? item.modules : []
+      const modules = rawModules
+        .map((module, moduleIndex) => {
+          if (!isPlainObject(module)) return null
+          const moduleId = asOptionalString(module.id) ?? generateId(`module-${id}`, moduleIndex)
+          const moduleName = asOptionalString(module.name) ?? `模块 ${moduleIndex + 1}`
+
+          return {
+            id: moduleId,
+            subjectId: id,
+            name: moduleName,
+          }
+        })
+        .filter((module): module is SubjectDefinition['modules'][number] => Boolean(module))
+
+      return {
+        id,
+        name,
+        shortName,
+        color,
+        modules,
+      }
+    })
+    .filter((subject): subject is SubjectDefinition => Boolean(subject))
+
+  return subjects.length > 0 ? subjects : createDefaultSubjects()
+}
+
+const ensureSubjectId = (
+  value: unknown,
+  index: number,
+  label: '宏任务' | '微任务',
+  subjectLookup: Record<string, SubjectDefinition>,
+): SubjectId => {
+  const subjectId = asString(value)
+  if (!subjectLookup[subjectId]) {
+    throw new Error(`第 ${index + 1} 条${label}的 subjectId 无效`)
+  }
+  return subjectId
+}
+
+const ensureModuleId = (
+  subjectId: SubjectId,
+  value: unknown,
+  index: number,
+  label: '宏任务' | '微任务',
+  moduleLookup: Record<string, SubjectDefinition['modules'][number]>,
+) => {
+  const moduleId = asString(value)
+  const module = moduleLookup[moduleId]
+
+  if (!module || module.subjectId !== subjectId) {
+    throw new Error(`第 ${index + 1} 条${label}的 moduleId 与 subjectId 不匹配`)
+  }
+
+  return moduleId
+}
+
+const normalizeMacroTasks = (
+  rawTasks: ImportedMacroTaskInput[],
+  subjectLookup: Record<string, SubjectDefinition>,
+  moduleLookup: Record<string, SubjectDefinition['modules'][number]>,
+) => {
   const ordered = rawTasks.map((task, index) => {
-    const subjectId = ensureSubjectId(task.subjectId, index, '宏任务')
-    const moduleId = ensureModuleId(subjectId, task.moduleId, index, '宏任务')
+    const subjectId = ensureSubjectId(task.subjectId, index, '宏任务', subjectLookup)
+    const moduleId = ensureModuleId(subjectId, task.moduleId, index, '宏任务', moduleLookup)
     const title = asString(task.title)
 
     if (!title) {
@@ -150,10 +200,7 @@ const normalizeMacroTasks = (rawTasks: ImportedMacroTaskInput[]) => {
     const nextStart = nextStartBySubject.get(task.subjectId)
     const startDate = nextStart ? maxISO(nextStart, startCandidate) : startCandidate
 
-    nextStartBySubject.set(
-      task.subjectId,
-      addDaysISO(startDate, task.estimatedDays),
-    )
+    nextStartBySubject.set(task.subjectId, addDaysISO(startDate, task.estimatedDays))
 
     return {
       id: task.id,
@@ -172,11 +219,8 @@ const normalizeMacroTasks = (rawTasks: ImportedMacroTaskInput[]) => {
   })
 
   const macroTaskIds = new Set(macroTasks.map((task) => task.id))
-
   macroTasks.forEach((task) => {
-    task.dependencies = task.dependencies.filter((dependency) =>
-      macroTaskIds.has(dependency),
-    )
+    task.dependencies = task.dependencies.filter((dependency) => macroTaskIds.has(dependency))
   })
 
   return macroTasks
@@ -185,6 +229,8 @@ const normalizeMacroTasks = (rawTasks: ImportedMacroTaskInput[]) => {
 const normalizeMicroTasks = (
   rawTasks: ImportedMicroTaskInput[],
   macroTaskIds: Set<string>,
+  subjectLookup: Record<string, SubjectDefinition>,
+  moduleLookup: Record<string, SubjectDefinition['modules'][number]>,
 ) => {
   const uniqueIds = new Set<string>()
 
@@ -194,8 +240,8 @@ const normalizeMicroTasks = (
       throw new Error(`第 ${index + 1} 条微任务的 date 不是合法日期`)
     }
 
-    const subjectId = ensureSubjectId(task.subjectId, index, '微任务')
-    const moduleId = ensureModuleId(subjectId, task.moduleId, index, '微任务')
+    const subjectId = ensureSubjectId(task.subjectId, index, '微任务', subjectLookup)
+    const moduleId = ensureModuleId(subjectId, task.moduleId, index, '微任务', moduleLookup)
     const title = asString(task.title)
 
     if (!title) {
@@ -244,16 +290,20 @@ export const parsePlannerImportPayload = (
   }
 
   const view = ensureView(value.view)
-  const macroTasks = normalizeMacroTasks(rawMacroTasks)
+  const subjects = normalizeSubjects(value.subjects)
+  const subjectLookup = getSubjectLookup(subjects)
+  const moduleLookup = getModuleLookup(subjects)
+  const macroTasks = normalizeMacroTasks(rawMacroTasks, subjectLookup, moduleLookup)
   const macroTaskIds = new Set(macroTasks.map((task) => task.id))
 
   const rawMicroTasks = value.microTasks
   const microTasks = Array.isArray(rawMicroTasks)
-    ? normalizeMicroTasks(rawMicroTasks, macroTaskIds)
+    ? normalizeMicroTasks(rawMicroTasks, macroTaskIds, subjectLookup, moduleLookup)
     : []
 
   return {
     view,
+    subjects,
     macroTasks,
     microTasks,
   }
@@ -331,15 +381,21 @@ export const mergePlannerImportData = (
       id: nextId,
       macroTaskId:
         mappedMacroTaskId &&
-        (currentMacroIds.has(mappedMacroTaskId) ||
-          appendedMacroIds.has(mappedMacroTaskId))
+        (currentMacroIds.has(mappedMacroTaskId) || appendedMacroIds.has(mappedMacroTaskId))
           ? mappedMacroTaskId
           : undefined,
     }
   })
 
+  const currentSubjectIds = new Set(current.subjects.map((subject) => subject.id))
+  const mergedSubjects = [
+    ...current.subjects,
+    ...imported.subjects.filter((subject) => !currentSubjectIds.has(subject.id)),
+  ]
+
   return {
     view: current.view,
+    subjects: mergedSubjects,
     macroTasks: normalizedMacroTasks,
     microTasks: [...current.microTasks, ...appendedMicroTasks],
   }

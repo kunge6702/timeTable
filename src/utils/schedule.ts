@@ -4,6 +4,7 @@ import type {
   MacroTask,
   MicroTask,
   SubjectAssignments,
+  SubjectDefinition,
   SubjectId,
 } from '../types'
 import {
@@ -17,8 +18,6 @@ import {
   maxISO,
   startOfYearISO,
 } from './date'
-
-export const SUBJECT_LANES: SubjectId[] = ['math', 'english', 'politics', 'cs408']
 
 export interface SubjectScheduleStat {
   subjectId: SubjectId
@@ -67,25 +66,22 @@ const assignTaskToDate = (
 }
 
 export const buildSchedule = (
+  subjects: SubjectDefinition[],
   macroTasks: MacroTask[],
   microTasks: MicroTask[],
   today = getTodayISO(),
   deadline = EXAM_DEADLINE,
 ): ScheduleSummary => {
+  const subjectLanes = subjects.map((subject) => subject.id)
   const openMacroTasks = [...macroTasks]
     .filter((task) => !task.completed && task.estimatedDays > 0)
     .sort((left, right) => left.order - right.order)
   const assignments = new Map<string, SubjectAssignments>()
   const defaultStartDate = addDaysISO(today, 1)
 
-  const subjectStats = SUBJECT_LANES.map((subjectId): SubjectScheduleStat => {
-    const subjectTasks = openMacroTasks.filter(
-      (task) => task.subjectId === subjectId,
-    )
-    const totalWorkUnits = subjectTasks.reduce(
-      (sum, task) => sum + task.estimatedDays,
-      0,
-    )
+  const subjectStats = subjectLanes.map((subjectId): SubjectScheduleStat => {
+    const subjectTasks = openMacroTasks.filter((task) => task.subjectId === subjectId)
+    const totalWorkUnits = subjectTasks.reduce((sum, task) => sum + task.estimatedDays, 0)
     let cursor: string | undefined
     let firstScheduledDate: string | undefined
     let finishDate = today
@@ -116,14 +112,8 @@ export const buildSchedule = (
   })
 
   const finishDate = maxISO(today, ...subjectStats.map((stat) => stat.finishDate))
-  const plannedCalendarDays = Math.max(
-    0,
-    ...subjectStats.map((stat) => stat.plannedCalendarDays),
-  )
-  const totalWorkUnits = subjectStats.reduce(
-    (sum, stat) => sum + stat.totalWorkUnits,
-    0,
-  )
+  const plannedCalendarDays = Math.max(0, ...subjectStats.map((stat) => stat.plannedCalendarDays))
+  const totalWorkUnits = subjectStats.reduce((sum, stat) => sum + stat.totalWorkUnits, 0)
   const overflowDays = Math.max(0, diffDaysISO(deadline, finishDate))
   const startDate = startOfYearISO(today)
   const endDate = maxISO(deadline, finishDate, addDaysISO(deadline, overflowDays + 21))
@@ -137,12 +127,11 @@ export const buildSchedule = (
 
   const cells = enumerateDates(startDate, endDate).map((date): HeatmapCell => {
     const assignedBySubject = assignments.get(date) ?? {}
-    const assignedTasks = SUBJECT_LANES.map(
-      (subjectId) => assignedBySubject[subjectId],
-    ).filter((task): task is MacroTask => Boolean(task))
-    const overflowSubjects = SUBJECT_LANES.filter(
-      (subjectId) =>
-        Boolean(assignedBySubject[subjectId]) && isAfterISO(date, deadline),
+    const assignedTasks = subjectLanes
+      .map((subjectId) => assignedBySubject[subjectId])
+      .filter((task): task is MacroTask => Boolean(task))
+    const overflowSubjects = subjectLanes.filter(
+      (subjectId) => Boolean(assignedBySubject[subjectId]) && isAfterISO(date, deadline),
     )
     const historicalTasks = tasksByDate.get(date) ?? []
     const { completionRate, reviewSummary } = summarizeHistory(historicalTasks)

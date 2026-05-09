@@ -1,10 +1,17 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { createDefaultMacroTasks, splitMacroTaskText } from '../data/catalog'
+import {
+  createDefaultMacroTasks,
+  createDefaultSubjects,
+  getModuleLookup,
+  splitMacroTaskText,
+} from '../data/catalog'
 import type {
   MacroTask,
   MicroTask,
+  PlannerBackupSnapshot,
   PlannerImportMode,
+  SubjectDefinition,
   SubjectId,
   WorkspaceView,
 } from '../types'
@@ -23,11 +30,22 @@ type NewMacroTask = Omit<
 >
 type PersistedMacroTask = Omit<MacroTask, 'startDate'> & { startDate?: string }
 
+const backupStorageKey = 'exam-planner-backups-v1'
+const maxBackupSnapshots = 5
+
 interface PlannerState {
   view: WorkspaceView
+  subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
+  backups: PlannerBackupSnapshot[]
   setView: (view: WorkspaceView) => void
+  addSubject: () => void
+  updateSubject: (id: string, patch: Partial<Pick<SubjectDefinition, 'name' | 'shortName'>>) => void
+  deleteSubject: (id: string) => { ok: boolean; reason?: string }
+  addModule: (subjectId: string) => void
+  updateModule: (moduleId: string, name: string) => void
+  deleteModule: (moduleId: string) => { ok: boolean; reason?: string }
   addMicroTask: (task: NewMicroTask) => void
   updateMicroTask: (id: string, patch: Partial<MicroTask>) => void
   toggleMicroTask: (id: string) => void
@@ -40,11 +58,11 @@ interface PlannerState {
     dragId: string,
     targetId: string,
     subjectId?: SubjectId,
+    moduleId?: string,
   ) => void
-  importPlannerData: (
-    payload: unknown,
-    mode?: PlannerImportMode,
-  ) => NormalizedPlannerImportData
+  importPlannerData: (payload: unknown, mode?: PlannerImportMode) => NormalizedPlannerImportData
+  restoreBackup: (backupId: string) => boolean
+  loadTemplate: () => void
   resetDemoData: () => void
 }
 
@@ -122,8 +140,10 @@ const createDefaultMicroTasks = (): MicroTask[] => {
 }
 
 const createInitialState = () => ({
+  subjects: createDefaultSubjects(),
   macroTasks: createDefaultMacroTasks(),
   microTasks: createDefaultMicroTasks(),
+  backups: [] as PlannerBackupSnapshot[],
 })
 
 const addFallbackStartDates = (macroTasks: PersistedMacroTask[]): MacroTask[] => {
@@ -135,10 +155,7 @@ const addFallbackStartDates = (macroTasks: PersistedMacroTask[]): MacroTask[] =>
   orderedTasks.forEach((task) => {
     const startDate = nextStartBySubject.get(task.subjectId) ?? defaultStartDate
     fallbackStartById.set(task.id, startDate)
-    nextStartBySubject.set(
-      task.subjectId,
-      addDaysISO(startDate, task.estimatedDays),
-    )
+    nextStartBySubject.set(task.subjectId, addDaysISO(startDate, task.estimatedDays))
   })
 
   return macroTasks.map((task) => ({
@@ -189,8 +206,71 @@ const sanitizeMigratedMicroTasks = (microTasks?: MicroTask[]) => {
   })
 }
 
+const sanitizeSubjects = (subjects?: SubjectDefinition[]) => {
+  if (!subjects || subjects.length === 0) return createDefaultSubjects()
+
+  return subjects.map((subject, subjectIndex) => ({
+    ...subject,
+    color: subject.color || createDefaultSubjects()[subjectIndex % createDefaultSubjects().length].color,
+    modules: subject.modules.map((module) => ({
+      ...module,
+      subjectId: subject.id,
+    })),
+  }))
+}
+
+const readBackupsFromStorage = () => {
+  if (typeof localStorage === 'undefined') return []
+
+  try {
+    const raw = localStorage.getItem(backupStorageKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as PlannerBackupSnapshot[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const writeBackupsToStorage = (snapshots: PlannerBackupSnapshot[]) => {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(backupStorageKey, JSON.stringify(snapshots))
+}
+
+const createBackupSnapshot = (state: {
+  view: WorkspaceView
+  subjects: SubjectDefinition[]
+  macroTasks: MacroTask[]
+  microTasks: MicroTask[]
+}): PlannerBackupSnapshot => ({
+  id: makeId('backup'),
+  createdAt: new Date().toISOString(),
+  view: state.view,
+  subjects: state.subjects,
+  macroTasks: state.macroTasks,
+  microTasks: state.microTasks,
+})
+
+const mergeBackups = (state: {
+  backups: PlannerBackupSnapshot[]
+  view: WorkspaceView
+  subjects: SubjectDefinition[]
+  macroTasks: MacroTask[]
+  microTasks: MicroTask[]
+}) => {
+  const nextSnapshots = [
+    createBackupSnapshot(state),
+    ...state.backups,
+  ].slice(0, maxBackupSnapshots)
+
+  writeBackupsToStorage(nextSnapshots)
+  return nextSnapshots
+}
+
 const migratePlannerState = (persistedState: unknown, version: number) => {
-  const state = (persistedState ?? {}) as Partial<PlannerState>
+  const state = (persistedState ?? {}) as Partial<PlannerState> & {
+    moduleNameOverrides?: Record<string, string>
+  }
   let nextState = state
 
   if (version < 2) {
@@ -216,7 +296,64 @@ const migratePlannerState = (persistedState: unknown, version: number) => {
     }
   }
 
+  if (version < 5) {
+    const subjects = createDefaultSubjects()
+    if (state.moduleNameOverrides) {
+      const moduleLookup = getModuleLookup(subjects)
+      Object.entries(state.moduleNameOverrides).forEach(([moduleId, name]) => {
+        if (moduleLookup[moduleId] && name.trim()) {
+          moduleLookup[moduleId].name = name.trim()
+        }
+      })
+    }
+
+    nextState = {
+      ...nextState,
+      subjects,
+    }
+  }
+
+  if (version < 6) {
+    nextState = {
+      ...nextState,
+      subjects: sanitizeSubjects(nextState.subjects),
+      backups: readBackupsFromStorage(),
+    }
+  }
+
   return nextState as PlannerState
+}
+
+const canDeleteSubject = (
+  subjectId: string,
+  subjects: SubjectDefinition[],
+  macroTasks: MacroTask[],
+  microTasks: MicroTask[],
+) => {
+  const subject = subjects.find((item) => item.id === subjectId)
+  if (!subject) return { ok: false, reason: '科目不存在' }
+  if (subject.modules.length > 0) return { ok: false, reason: '该 L0 下还有 L1，不能删除' }
+  if (macroTasks.some((task) => task.subjectId === subjectId)) {
+    return { ok: false, reason: '该 L0 下还有 L2，不能删除' }
+  }
+  if (microTasks.some((task) => task.subjectId === subjectId)) {
+    return { ok: false, reason: '该 L0 下还有 L3，不能删除' }
+  }
+  return { ok: true }
+}
+
+const canDeleteModule = (
+  moduleId: string,
+  macroTasks: MacroTask[],
+  microTasks: MicroTask[],
+) => {
+  if (macroTasks.some((task) => task.moduleId === moduleId)) {
+    return { ok: false, reason: '该 L1 下还有 L2，不能删除' }
+  }
+  if (microTasks.some((task) => task.moduleId === moduleId)) {
+    return { ok: false, reason: '该 L1 下还有 L3，不能删除' }
+  }
+  return { ok: true }
 }
 
 export const usePlannerStore = create<PlannerState>()(
@@ -224,19 +361,150 @@ export const usePlannerStore = create<PlannerState>()(
     (set, get) => ({
       view: 'execution',
       ...createInitialState(),
+      backups: readBackupsFromStorage(),
       setView: (view) => set({ view }),
+      addSubject: () =>
+        set((state) => {
+          const subjectIndex = state.subjects.length
+          const nextState = {
+            ...state,
+            subjects: [
+              ...state.subjects,
+              {
+                id: makeId('subject'),
+                name: `新科目 ${subjectIndex + 1}`,
+                shortName: `SUB${subjectIndex + 1}`,
+                color: createDefaultSubjects()[subjectIndex % createDefaultSubjects().length].color,
+                modules: [],
+              },
+            ],
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
+      updateSubject: (id, patch) =>
+        set((state) => {
+          const nextState = {
+            ...state,
+            subjects: state.subjects.map((subject) =>
+              subject.id === id
+                ? {
+                    ...subject,
+                    name: patch.name?.trim() || subject.name,
+                    shortName: patch.shortName?.trim() || subject.shortName,
+                  }
+                : subject,
+            ),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
+      deleteSubject: (id) => {
+        const guard = canDeleteSubject(
+          id,
+          get().subjects,
+          get().macroTasks,
+          get().microTasks,
+        )
+        if (!guard.ok) return guard
+
+        set((state) => {
+          const nextState = {
+            ...state,
+            subjects: state.subjects.filter((subject) => subject.id !== id),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        })
+        return { ok: true }
+      },
+      addModule: (subjectId) =>
+        set((state) => {
+          const nextState = {
+            ...state,
+            subjects: state.subjects.map((subject) =>
+              subject.id === subjectId
+                ? {
+                    ...subject,
+                    modules: [
+                      ...subject.modules,
+                      {
+                        id: makeId('module'),
+                        subjectId,
+                        name: `新模块 ${subject.modules.length + 1}`,
+                      },
+                    ],
+                  }
+                : subject,
+            ),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
+      updateModule: (moduleId, name) =>
+        set((state) => {
+          const nextState = {
+            ...state,
+            subjects: state.subjects.map((subject) => ({
+              ...subject,
+              modules: subject.modules.map((module) =>
+                module.id === moduleId
+                  ? { ...module, name: name.trim() || module.name }
+                  : module,
+              ),
+            })),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
+      deleteModule: (moduleId) => {
+        const guard = canDeleteModule(moduleId, get().macroTasks, get().microTasks)
+        if (!guard.ok) return guard
+
+        set((state) => {
+          const nextState = {
+            ...state,
+            subjects: state.subjects.map((subject) => ({
+              ...subject,
+              modules: subject.modules.filter((module) => module.id !== moduleId),
+            })),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        })
+        return { ok: true }
+      },
       addMicroTask: (task) =>
-        set((state) => ({
-          microTasks: [
-            {
-              ...task,
-              id: makeId('micro'),
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-            ...state.microTasks,
-          ],
-        })),
+        set((state) => {
+          const nextState = {
+            ...state,
+            microTasks: [
+              {
+                ...task,
+                id: makeId('micro'),
+                completed: false,
+                createdAt: new Date().toISOString(),
+              },
+              ...state.microTasks,
+            ],
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
       updateMicroTask: (id, patch) =>
         set((state) => ({
           microTasks: state.microTasks.map((task) =>
@@ -250,29 +518,43 @@ export const usePlannerStore = create<PlannerState>()(
           ),
         })),
       deleteMicroTask: (id) =>
-        set((state) => ({
-          microTasks: state.microTasks.filter((task) => task.id !== id),
-        })),
+        set((state) => {
+          const nextState = {
+            ...state,
+            microTasks: state.microTasks.filter((task) => task.id !== id),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
       addMacroTask: (task) =>
-        set((state) => ({
-          macroTasks: [
-            ...state.macroTasks,
-            {
-              ...task,
-              id: makeId('macro'),
-              order:
-                Math.max(0, ...state.macroTasks.map((macro) => macro.order)) + 1,
-              completed: false,
-              dependencies: [],
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        })),
+        set((state) => {
+          const nextState = {
+            ...state,
+            macroTasks: [
+              ...state.macroTasks,
+              {
+                ...task,
+                id: makeId('macro'),
+                order:
+                  Math.max(0, ...state.macroTasks.map((macro) => macro.order)) + 1,
+                completed: false,
+                dependencies: [],
+                createdAt: new Date().toISOString(),
+              },
+            ],
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
       updateMacroTask: (id, patch) =>
         set((state) => ({
           macroTasks: state.macroTasks.map((task) =>
             task.id === id ? { ...task, ...patch } : task,
-          )
+          ),
         })),
       toggleMacroTask: (id) =>
         set((state) => ({
@@ -281,23 +563,29 @@ export const usePlannerStore = create<PlannerState>()(
           ),
         })),
       deleteMacroTask: (id) =>
-        set((state) => ({
-          macroTasks: resequence(
-            state.macroTasks.filter((task) => task.id !== id),
-          ),
-          microTasks: state.microTasks.map((task) =>
-            task.macroTaskId === id ? { ...task, macroTaskId: undefined } : task,
-          ),
-        })),
-      reorderMacroTask: (dragId, targetId, subjectId) => {
+        set((state) => {
+          const nextState = {
+            ...state,
+            macroTasks: resequence(state.macroTasks.filter((task) => task.id !== id)),
+            microTasks: state.microTasks.map((task) =>
+              task.macroTaskId === id ? { ...task, macroTaskId: undefined } : task,
+            ),
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        }),
+      reorderMacroTask: (dragId, targetId, subjectId, moduleId) => {
         if (dragId === targetId) return
 
-        const ordered = [...get().macroTasks].sort(
-          (left, right) => left.order - right.order,
-        )
-        const reorderScope = subjectId
-          ? ordered.filter((task) => task.subjectId === subjectId)
-          : ordered
+        const ordered = [...get().macroTasks].sort((left, right) => left.order - right.order)
+        const isInScope = (task: MacroTask) => {
+          if (moduleId) return task.moduleId === moduleId
+          if (subjectId) return task.subjectId === subjectId
+          return true
+        }
+        const reorderScope = ordered.filter(isInScope)
         const dragIndex = reorderScope.findIndex((task) => task.id === dragId)
         const targetIndex = reorderScope.findIndex((task) => task.id === targetId)
 
@@ -307,23 +595,35 @@ export const usePlannerStore = create<PlannerState>()(
         const [dragged] = nextScope.splice(dragIndex, 1)
         nextScope.splice(targetIndex, 0, dragged)
 
-        if (!subjectId) {
-          set({ macroTasks: resequence(nextScope) })
+        if (!subjectId && !moduleId) {
+          const nextState = {
+            ...get(),
+            macroTasks: resequence(nextScope),
+          }
+          set({
+            macroTasks: nextState.macroTasks,
+            backups: mergeBackups(nextState),
+          })
           return
         }
 
         const scopeQueue = [...nextScope]
-        const merged = ordered.map((task) =>
-          task.subjectId === subjectId ? scopeQueue.shift() ?? task : task,
-        )
-
-        set({ macroTasks: resequence(merged) })
+        const merged = ordered.map((task) => (isInScope(task) ? scopeQueue.shift() ?? task : task))
+        const nextState = {
+          ...get(),
+          macroTasks: resequence(merged),
+        }
+        set({
+          macroTasks: nextState.macroTasks,
+          backups: mergeBackups(nextState),
+        })
       },
       importPlannerData: (payload, mode = 'replace') => {
         const imported = parsePlannerImportPayload(payload)
         const merged = mergePlannerImportData(
           {
             view: get().view,
+            subjects: get().subjects,
             macroTasks: get().macroTasks,
             microTasks: get().microTasks,
           },
@@ -331,19 +631,61 @@ export const usePlannerStore = create<PlannerState>()(
           mode,
         )
 
-        set(merged)
+        set({
+          view: merged.view,
+          subjects: merged.subjects,
+          macroTasks: merged.macroTasks,
+          microTasks: merged.microTasks,
+          backups: mergeBackups({
+            backups: get().backups,
+            view: merged.view,
+            subjects: merged.subjects,
+            macroTasks: merged.macroTasks,
+            microTasks: merged.microTasks,
+          }),
+        })
         return merged
       },
-      resetDemoData: () => set({ ...createInitialState(), view: 'execution' }),
+      restoreBackup: (backupId) => {
+        const backup = get().backups.find((item) => item.id === backupId)
+        if (!backup) return false
+        set({
+          view: backup.view,
+          subjects: backup.subjects,
+          macroTasks: backup.macroTasks,
+          microTasks: backup.microTasks,
+          backups: get().backups,
+        })
+        return true
+      },
+      loadTemplate: () => {
+        const nextState = {
+          view: 'execution' as WorkspaceView,
+          ...createInitialState(),
+        }
+        set({
+          ...nextState,
+          backups: mergeBackups(nextState),
+        })
+      },
+      resetDemoData: () => {
+        const nextState = {
+          view: 'execution' as WorkspaceView,
+          ...createInitialState(),
+        }
+        set({
+          ...nextState,
+          backups: mergeBackups(nextState),
+        })
+      },
     }),
     {
       name: 'exam-planner-state-v1',
       storage: createJSONStorage(() => localStorage),
-      version: 4,
+      version: 6,
       migrate: migratePlannerState,
     },
   ),
 )
 
-export const getSubjectClassName = (subjectId: SubjectId) =>
-  `subject-${subjectId}`
+export const getSubjectClassName = (subjectId: SubjectId) => `subject-${subjectId}`

@@ -1,12 +1,13 @@
 import { CalendarDays, CheckCircle2, Circle, Clock3, LockKeyhole, X } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
-import { moduleById, subjectById } from '../data/catalog'
-import type { MacroTask, MicroTask } from '../types'
+import type { MacroTask, MicroTask, SubjectDefinition } from '../types'
 import { formatZhDate } from '../utils/date'
+import { getModuleName, getSubjectInlineStyle, getSubjectName } from '../utils/subjectView'
 
 interface HistoricalBoardDialogProps {
   open: boolean
   date: string | null
+  subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
   onClose: () => void
@@ -15,6 +16,7 @@ interface HistoricalBoardDialogProps {
 export function HistoricalBoardDialog({
   open,
   date,
+  subjects,
   macroTasks,
   microTasks,
   onClose,
@@ -54,9 +56,7 @@ export function HistoricalBoardDialog({
 
   const doneCount = tasksForDate.filter((task) => task.completed).length
   const completionRate =
-    tasksForDate.length === 0
-      ? 0
-      : Math.round((doneCount / tasksForDate.length) * 100)
+    tasksForDate.length === 0 ? 0 : Math.round((doneCount / tasksForDate.length) * 100)
 
   if (!open || !date) return null
 
@@ -112,20 +112,14 @@ export function HistoricalBoardDialog({
 
           <div className="task-stack history-task-stack">
             {tasksForDate.length === 0 ? (
-              <div className="empty-state history-empty">
-                这一天没有记录到 L3 任务。
-              </div>
+              <div className="empty-state history-empty">这一天没有记录到 L3 任务。</div>
             ) : (
               tasksForDate.map((task) => {
-                const macro = task.macroTaskId
-                  ? macroTaskById.get(task.macroTaskId)
-                  : undefined
+                const macro = task.macroTaskId ? macroTaskById.get(task.macroTaskId) : undefined
 
                 return (
                   <article
-                    className={`micro-task is-readonly ${
-                      task.completed ? 'is-done' : ''
-                    }`}
+                    className={`micro-task is-readonly ${task.completed ? 'is-done' : ''}`}
                     key={task.id}
                   >
                     <div className="icon-check is-static" aria-hidden="true">
@@ -136,32 +130,27 @@ export function HistoricalBoardDialog({
                       <div className="micro-title readonly-text">{task.title}</div>
 
                       <div className="path-line">
-                        <span className={`subject-pill subject-${task.subjectId}`}>
-                          {subjectById[task.subjectId].name}
+                        <span
+                          className="subject-pill"
+                          style={getSubjectInlineStyle(task.subjectId, subjects)}
+                        >
+                          {getSubjectName(task.subjectId, subjects)}
                         </span>
-                        <span>{moduleById[task.moduleId]?.name ?? '未归档'}</span>
+                        <span>{getModuleName(task.moduleId, subjects)}</span>
                         {macro ? <span>{macro.title}</span> : null}
                       </div>
 
                       <div className="feedback-grid readonly-grid">
                         <label>
                           <span>Outcome</span>
-                          <div
-                            className={`readonly-panel ${
-                              task.outcome.trim() ? '' : 'is-empty'
-                            }`}
-                          >
+                          <div className={`readonly-panel ${task.outcome.trim() ? '' : 'is-empty'}`}>
                             {task.outcome.trim() || '未填写'}
                           </div>
                         </label>
 
                         <label>
                           <span>Error Tracking</span>
-                          <div
-                            className={`readonly-panel ${
-                              task.reviewNote.trim() ? '' : 'is-empty'
-                            }`}
-                          >
+                          <div className={`readonly-panel ${task.reviewNote.trim() ? '' : 'is-empty'}`}>
                             {task.reviewNote.trim() || '未填写'}
                           </div>
                         </label>
