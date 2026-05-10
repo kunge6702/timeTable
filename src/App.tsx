@@ -17,6 +17,7 @@ function App() {
       subjects,
       macroTasks,
       microTasks,
+      backlogTasks,
     } = usePlannerStore.getState()
     const payload = {
       version: 1,
@@ -24,6 +25,7 @@ function App() {
       subjects,
       macroTasks,
       microTasks,
+      backlogTasks,
     }
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], {

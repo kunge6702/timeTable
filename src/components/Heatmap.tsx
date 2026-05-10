@@ -67,6 +67,79 @@ const buildTooltip = (cell: HeatmapCell, subjects: SubjectDefinition[]) => {
   return `${date} / 空闲`
 }
 
+interface HeatmapCellButtonProps {
+  cell: HeatmapCell
+  subjects: SubjectDefinition[]
+  weekIndex: number
+  dayIndex: number
+  onPastDateClick?: (date: string) => void
+}
+
+function HeatmapCellButton({
+  cell,
+  subjects,
+  weekIndex,
+  dayIndex,
+  onPastDateClick,
+}: HeatmapCellButtonProps) {
+  const tooltip = buildTooltip(cell, subjects)
+  const isClickable = cell.status === 'past' && Boolean(onPastDateClick)
+
+  return (
+    <button
+      className={`heat-cell ${getCellTone(cell)} ${getCellStateClass(cell)} ${
+        cell.isOverflow ? 'overflow' : ''
+      } ${cell.isWarmupCompleted ? 'is-warmup-completed' : ''}`}
+      style={{
+        gridColumn: weekIndex + 1,
+        gridRow: dayIndex + 1,
+      }}
+      type="button"
+      aria-label={tooltip}
+      data-tip={tooltip}
+      onClick={() => {
+        if (cell.status !== 'past') return
+        onPastDateClick?.(cell.date)
+      }}
+      disabled={!isClickable}
+      aria-disabled={!isClickable}
+      data-clickable={isClickable ? 'true' : 'false'}
+    >
+      {subjects.length > 0 ? (
+        <span
+          className="heat-lanes"
+          style={{
+            gridTemplateColumns:
+              subjects.length <= 4
+                ? `repeat(${Math.min(2, subjects.length)}, minmax(0, 1fr))`
+                : `repeat(${Math.min(3, subjects.length)}, minmax(0, 1fr))`,
+          }}
+        >
+          {subjects.map((subject) => {
+            const task = cell.assignedBySubject[subject.id]
+            return (
+              <span
+                className={`cell-lane ${task ? 'is-filled' : 'is-empty'} ${
+                  cell.overflowSubjects.includes(subject.id) ? 'is-overflow' : ''
+                }`}
+                key={subject.id}
+                aria-hidden="true"
+                style={{
+                  backgroundColor: task
+                    ? cell.overflowSubjects.includes(subject.id)
+                      ? 'var(--signal)'
+                      : getSubjectColor(subject.id, subjects)
+                    : undefined,
+                }}
+              />
+            )
+          })}
+        </span>
+      ) : null}
+    </button>
+  )
+}
+
 export function Heatmap({ cells, subjects, onPastDateClick }: HeatmapProps) {
   const { weeks, monthLabels } = useMemo(() => {
     if (cells.length === 0) {
@@ -117,58 +190,14 @@ export function Heatmap({ cells, subjects, onPastDateClick }: HeatmapProps) {
           {weeks.map((week, weekIndex) =>
             week.map((cell, dayIndex) =>
               cell ? (
-                <button
+                <HeatmapCellButton
                   key={cell.date}
-                  className={`heat-cell ${getCellTone(cell)} ${getCellStateClass(cell)} ${
-                    cell.isOverflow ? 'overflow' : ''
-                  }`}
-                  style={{
-                    gridColumn: weekIndex + 1,
-                    gridRow: dayIndex + 1,
-                  }}
-                  type="button"
-                  aria-label={buildTooltip(cell, subjects)}
-                  data-tip={buildTooltip(cell, subjects)}
-                  onClick={() => {
-                    if (cell.status !== 'past') return
-                    onPastDateClick?.(cell.date)
-                  }}
-                  disabled={cell.status !== 'past' || !onPastDateClick}
-                  aria-disabled={cell.status !== 'past' || !onPastDateClick}
-                  data-clickable={cell.status === 'past' && onPastDateClick ? 'true' : 'false'}
-                >
-                  {subjects.length > 0 ? (
-                    <span
-                      className="heat-lanes"
-                      style={{
-                        gridTemplateColumns:
-                          subjects.length <= 4
-                            ? `repeat(${Math.min(2, subjects.length)}, minmax(0, 1fr))`
-                            : `repeat(${Math.min(3, subjects.length)}, minmax(0, 1fr))`,
-                      }}
-                    >
-                      {subjects.map((subject) => {
-                        const task = cell.assignedBySubject[subject.id]
-                        return (
-                          <span
-                            className={`cell-lane ${task ? 'is-filled' : 'is-empty'} ${
-                              cell.overflowSubjects.includes(subject.id) ? 'is-overflow' : ''
-                            }`}
-                            key={subject.id}
-                            aria-hidden="true"
-                            style={{
-                              backgroundColor: task
-                                ? cell.overflowSubjects.includes(subject.id)
-                                  ? 'var(--signal)'
-                                  : getSubjectColor(subject.id, subjects)
-                                : undefined,
-                            }}
-                          />
-                        )
-                      })}
-                    </span>
-                  ) : null}
-                </button>
+                  cell={cell}
+                  subjects={subjects}
+                  weekIndex={weekIndex}
+                  dayIndex={dayIndex}
+                  onPastDateClick={onPastDateClick}
+                />
               ) : (
                 <span
                   key={`blank-${weekIndex}-${dayIndex}`}

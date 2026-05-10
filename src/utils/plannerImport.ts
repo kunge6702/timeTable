@@ -1,5 +1,7 @@
 import { createDefaultSubjects, getModuleLookup, getSubjectLookup } from '../data/catalog'
 import type {
+  BacklogTask,
+  ImportedBacklogTaskInput,
   ImportedMacroTaskInput,
   ImportedMicroTaskInput,
   MacroTask,
@@ -17,6 +19,7 @@ export interface NormalizedPlannerImportData {
   subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
+  backlogTasks: BacklogTask[]
 }
 
 const validViews: WorkspaceView[] = ['execution', 'strategy']
@@ -113,7 +116,7 @@ const normalizeSubjects = (value: unknown): SubjectDefinition[] => {
 const ensureSubjectId = (
   value: unknown,
   index: number,
-  label: '宏任务' | '微任务',
+  label: string,
   subjectLookup: Record<string, SubjectDefinition>,
 ): SubjectId => {
   const subjectId = asString(value)
@@ -127,7 +130,7 @@ const ensureModuleId = (
   subjectId: SubjectId,
   value: unknown,
   index: number,
-  label: '宏任务' | '微任务',
+  label: string,
   moduleLookup: Record<string, SubjectDefinition['modules'][number]>,
 ) => {
   const moduleId = asString(value)
@@ -275,6 +278,67 @@ const normalizeMicroTasks = (
   })
 }
 
+const normalizeBacklogTasks = (
+  rawTasks: ImportedBacklogTaskInput[],
+  macroTaskIds: Set<string>,
+  subjectLookup: Record<string, SubjectDefinition>,
+  moduleLookup: Record<string, SubjectDefinition['modules'][number]>,
+) => {
+  const uniqueIds = new Set<string>()
+
+  return rawTasks.map((task, index) => {
+    const rawSubjectId = asOptionalString(task.subjectId)
+    const subjectId = rawSubjectId
+      ? ensureSubjectId(rawSubjectId, index, '温热任务', subjectLookup)
+      : undefined
+    const rawModuleId = asOptionalString(task.moduleId)
+    const moduleId =
+      subjectId && rawModuleId
+        ? ensureModuleId(subjectId, rawModuleId, index, '温热任务', moduleLookup)
+        : undefined
+    const title = asString(task.title)
+
+    if (!title) {
+      throw new Error(`第 ${index + 1} 条温热任务缺少 title`)
+    }
+
+    const id = asOptionalString(task.id) ?? generateId('backlog-import', index)
+    if (uniqueIds.has(id)) {
+      throw new Error(`第 ${index + 1} 条温热任务的 id 重复`)
+    }
+    uniqueIds.add(id)
+
+    const macroTaskId = asOptionalString(task.macroTaskId)
+    const createdAt = asOptionalString(task.createdAt)
+    const availableDate = asOptionalString(task.availableDate)
+    const completedDate = asOptionalString(task.completedDate)
+
+    if (availableDate && !isValidIsoDate(availableDate)) {
+      throw new Error(`第 ${index + 1} 条温热任务的 availableDate 不是合法日期`)
+    }
+
+    if (completedDate && !isValidIsoDate(completedDate)) {
+      throw new Error(`第 ${index + 1} 条温热任务的 completedDate 不是合法日期`)
+    }
+
+    return {
+      id,
+      subjectId,
+      moduleId,
+      macroTaskId: macroTaskId && macroTaskIds.has(macroTaskId) ? macroTaskId : undefined,
+      title,
+      source: asOptionalString(task.source) ?? '错题缓存',
+      completed: asBoolean(task.completed) ?? false,
+      createdAt:
+        createdAt && !Number.isNaN(Date.parse(createdAt))
+          ? createdAt
+          : new Date().toISOString(),
+      availableDate,
+      completedDate,
+    } satisfies BacklogTask
+  })
+}
+
 export const parsePlannerImportPayload = (
   value: unknown,
 ): NormalizedPlannerImportData => {
@@ -300,12 +364,17 @@ export const parsePlannerImportPayload = (
   const microTasks = Array.isArray(rawMicroTasks)
     ? normalizeMicroTasks(rawMicroTasks, macroTaskIds, subjectLookup, moduleLookup)
     : []
+  const rawBacklogTasks = value.backlogTasks
+  const backlogTasks = Array.isArray(rawBacklogTasks)
+    ? normalizeBacklogTasks(rawBacklogTasks, macroTaskIds, subjectLookup, moduleLookup)
+    : []
 
   return {
     view,
     subjects,
     macroTasks,
     microTasks,
+    backlogTasks,
   }
 }
 
@@ -387,6 +456,25 @@ export const mergePlannerImportData = (
     }
   })
 
+  const currentBacklogIds = new Set(current.backlogTasks.map((task) => task.id))
+  const usedBacklogIds = new Set(currentBacklogIds)
+  const appendedBacklogTasks = imported.backlogTasks.map((task) => {
+    const nextId = makeUniqueId(task.id, usedBacklogIds)
+    const mappedMacroTaskId = task.macroTaskId
+      ? importedMacroIdMap.get(task.macroTaskId) ?? task.macroTaskId
+      : undefined
+
+    return {
+      ...task,
+      id: nextId,
+      macroTaskId:
+        mappedMacroTaskId &&
+        (currentMacroIds.has(mappedMacroTaskId) || appendedMacroIds.has(mappedMacroTaskId))
+          ? mappedMacroTaskId
+          : undefined,
+    }
+  })
+
   const currentSubjectIds = new Set(current.subjects.map((subject) => subject.id))
   const mergedSubjects = [
     ...current.subjects,
@@ -398,5 +486,6 @@ export const mergePlannerImportData = (
     subjects: mergedSubjects,
     macroTasks: normalizedMacroTasks,
     microTasks: [...current.microTasks, ...appendedMicroTasks],
+    backlogTasks: [...current.backlogTasks, ...appendedBacklogTasks],
   }
 }

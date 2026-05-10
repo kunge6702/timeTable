@@ -71,6 +71,7 @@ export const buildSchedule = (
   microTasks: MicroTask[],
   today = getTodayISO(),
   deadline = EXAM_DEADLINE,
+  warmupCompletedDates: ReadonlySet<string> = new Set(),
 ): ScheduleSummary => {
   const subjectLanes = subjects.map((subject) => subject.id)
   const openMacroTasks = [...macroTasks]
@@ -145,6 +146,7 @@ export const buildSchedule = (
       date,
       status,
       completionRate,
+      isWarmupCompleted: warmupCompletedDates.has(date),
       assignedTasks,
       assignedBySubject,
       overflowSubjects,

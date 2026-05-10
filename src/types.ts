@@ -44,6 +44,19 @@ export interface MicroTask {
   createdAt: string
 }
 
+export interface BacklogTask {
+  id: string
+  subjectId?: SubjectId
+  moduleId?: string
+  macroTaskId?: string
+  title: string
+  source: string
+  completed: boolean
+  createdAt: string
+  availableDate?: string
+  completedDate?: string
+}
+
 export interface ImportedMacroTaskInput {
   id?: string
   subjectId: SubjectId
@@ -72,12 +85,26 @@ export interface ImportedMicroTaskInput {
   createdAt?: string
 }
 
+export interface ImportedBacklogTaskInput {
+  id?: string
+  subjectId?: SubjectId
+  moduleId?: string
+  macroTaskId?: string
+  title: string
+  source?: string
+  completed?: boolean
+  createdAt?: string
+  availableDate?: string
+  completedDate?: string
+}
+
 export interface PlannerImportPayload {
   version?: number
   view?: WorkspaceView
   subjects?: SubjectDefinition[]
   macroTasks: ImportedMacroTaskInput[]
   microTasks?: ImportedMicroTaskInput[]
+  backlogTasks?: ImportedBacklogTaskInput[]
 }
 
 export interface PlannerBackupSnapshot {
@@ -87,6 +114,7 @@ export interface PlannerBackupSnapshot {
   subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
+  backlogTasks: BacklogTask[]
 }
 
 export type SubjectAssignments = Partial<Record<SubjectId, MacroTask>>
@@ -95,6 +123,7 @@ export interface HeatmapCell {
   date: string
   status: 'past' | 'today' | 'future'
   completionRate?: number
+  isWarmupCompleted: boolean
   assignedTasks: MacroTask[]
   assignedBySubject: SubjectAssignments
   overflowSubjects: SubjectId[]

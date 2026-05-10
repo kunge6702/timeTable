@@ -4,11 +4,12 @@ import type { FormEvent } from 'react'
 import { EXAM_DEADLINE, getModulesForSubject, getSubjectLookup } from '../data/catalog'
 import { usePlannerStore } from '../store/plannerStore'
 import type { SubjectId } from '../types'
-import { formatZhDate, getTodayISO } from '../utils/date'
+import { addDaysISO, compareISO, formatZhDate, getTodayISO } from '../utils/date'
 import { buildSchedule } from '../utils/schedule'
 import { getModuleName, getSubjectInlineStyle, getSubjectName } from '../utils/subjectView'
 import { Heatmap } from './Heatmap'
 import { HistoricalBoardDialog } from './HistoricalBoardDialog'
+import { TaskBacklogQueue } from './TaskBacklogQueue'
 
 export function ExecutionDashboard() {
   const today = getTodayISO()
@@ -19,6 +20,10 @@ export function ExecutionDashboard() {
   const updateMicroTask = usePlannerStore((state) => state.updateMicroTask)
   const toggleMicroTask = usePlannerStore((state) => state.toggleMicroTask)
   const deleteMicroTask = usePlannerStore((state) => state.deleteMicroTask)
+  const backlogTasks = usePlannerStore((state) => state.backlogTasks)
+  const addBacklogTask = usePlannerStore((state) => state.addBacklogTask)
+  const completeBacklogTask = usePlannerStore((state) => state.completeBacklogTask)
+  const revertBacklogTask = usePlannerStore((state) => state.revertBacklogTask)
 
   const defaultSubjectId = subjects[0]?.id ?? ''
   const defaultModuleId = subjects[0]?.modules[0]?.id ?? ''
@@ -29,6 +34,7 @@ export function ExecutionDashboard() {
   const [macroTaskId, setMacroTaskId] = useState('')
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set())
   const [historyDate, setHistoryDate] = useState<string | null>(null)
+  const [lastCompletedBacklogTaskId, setLastCompletedBacklogTaskId] = useState<string | null>(null)
 
   const subjectLookup = useMemo(() => getSubjectLookup(subjects), [subjects])
   const activeSubject = useMemo(
@@ -66,9 +72,32 @@ export function ExecutionDashboard() {
   const doneCount = todaysTasks.filter((task) => task.completed).length
   const completionRate =
     todaysTasks.length === 0 ? 0 : Math.round((doneCount / todaysTasks.length) * 100)
+  const openBacklogTasks = useMemo(
+    () =>
+      backlogTasks.filter(
+        (task) => !task.completed && (!task.availableDate || compareISO(task.availableDate, today) <= 0),
+      ),
+    [backlogTasks, today],
+  )
+  const recentlyCompletedBacklogTask = useMemo(
+    () =>
+      lastCompletedBacklogTaskId
+        ? backlogTasks.find((task) => task.id === lastCompletedBacklogTaskId)
+        : undefined,
+    [backlogTasks, lastCompletedBacklogTaskId],
+  )
+  const warmupCompletedDates = useMemo(
+    () =>
+      new Set(
+        backlogTasks
+          .map((task) => (task.completed ? task.completedDate : undefined))
+          .filter((date): date is string => Boolean(date)),
+      ),
+    [backlogTasks],
+  )
   const scheduleSummary = useMemo(
-    () => buildSchedule(subjects, macroTasks, microTasks, today, EXAM_DEADLINE),
-    [macroTasks, microTasks, subjects, today],
+    () => buildSchedule(subjects, macroTasks, microTasks, today, EXAM_DEADLINE, warmupCompletedDates),
+    [macroTasks, microTasks, subjects, today, warmupCompletedDates],
   )
 
   const handleSubjectChange = (nextSubjectId: SubjectId) => {
@@ -112,6 +141,50 @@ export function ExecutionDashboard() {
     setExpandedTaskIds((current) => new Set(current).add(taskId))
   }
 
+  const handleBacklogTaskComplete = (taskId: string) => {
+    completeBacklogTask(taskId, today)
+    setLastCompletedBacklogTaskId(taskId)
+  }
+
+  const handleBacklogTaskUndo = (taskId: string) => {
+    revertBacklogTask(taskId)
+    setLastCompletedBacklogTaskId(null)
+  }
+
+  const handleQuickBacklogAdd = (taskTitle: string) => {
+    addBacklogTask({
+      title: taskTitle,
+      source: 'Quick Add',
+      availableDate: today,
+    })
+  }
+
+  const getReviewBacklogTitle = (reviewNote: string) =>
+    reviewNote.trim().split(/\r?\n/)[0]?.slice(0, 80).trim() ?? ''
+
+  const handleReviewBacklogAdd = (taskId: string) => {
+    const task = todaysTasks.find((item) => item.id === taskId)
+    if (!task) return
+
+    const backlogTitle = getReviewBacklogTitle(task.reviewNote)
+    if (!backlogTitle) return
+
+    const backlogSource = `来自 L3: ${task.title}`
+    const alreadyCaptured = backlogTasks.some(
+      (item) => item.title === backlogTitle && item.source === backlogSource && !item.completed,
+    )
+    if (alreadyCaptured) return
+
+    addBacklogTask({
+      subjectId: task.subjectId,
+      moduleId: task.moduleId,
+      macroTaskId: task.macroTaskId,
+      title: backlogTitle,
+      source: backlogSource,
+      availableDate: addDaysISO(today, 1),
+    })
+  }
+
   return (
     <section className="workbench execution-workbench">
       <div className="execution-head">
@@ -128,6 +201,8 @@ export function ExecutionDashboard() {
         </div>
       </div>
 
+      <div className="execution-layout">
+        <div className="execution-main-column">
       <section className="execution-heatmap-hero">
         <div className="execution-heatmap-copy">
           <div>
@@ -239,6 +314,14 @@ export function ExecutionDashboard() {
           todaysTasks.map((task) => {
             const macro = macroTasks.find((item) => item.id === task.macroTaskId)
             const isExpanded = expandedTaskIds.has(task.id)
+            const reviewBacklogTitle = getReviewBacklogTitle(task.reviewNote)
+            const reviewBacklogSource = `来自 L3: ${task.title}`
+            const isReviewCaptured = backlogTasks.some(
+              (item) =>
+                item.title === reviewBacklogTitle &&
+                item.source === reviewBacklogSource &&
+                !item.completed,
+            )
             return (
               <article
                 className={`micro-task ${task.completed ? 'is-done' : ''} ${
@@ -294,15 +377,36 @@ export function ExecutionDashboard() {
                         }
                       />
                     </label>
-                    <label>
-                      <span>Error Tracking</span>
+                    <div className="feedback-field">
+                      <div className="feedback-field__head">
+                        <span>Error Tracking</span>
+                        <button
+                          className={`backlog-capture-button ${
+                            isReviewCaptured ? 'is-captured' : ''
+                          }`}
+                          disabled={!reviewBacklogTitle || isReviewCaptured}
+                          onClick={() => handleReviewBacklogAdd(task.id)}
+                          type="button"
+                          title={
+                            isReviewCaptured
+                              ? '已移入 Backlog'
+                              : reviewBacklogTitle
+                                ? '移入 Backlog'
+                                : '先写错因'
+                          }
+                        >
+                          <Plus size={14} />
+                          {isReviewCaptured ? '已入 Backlog' : reviewBacklogTitle ? '移入 Backlog' : '先写错因'}
+                        </button>
+                      </div>
                       <textarea
+                        aria-label="Error Tracking"
                         value={task.reviewNote}
                         onChange={(event) =>
                           updateMicroTask(task.id, { reviewNote: event.target.value })
                         }
                       />
-                    </label>
+                    </div>
                   </div>
                 </div>
                 <button
@@ -317,6 +421,17 @@ export function ExecutionDashboard() {
             )
           })
         )}
+      </div>
+        </div>
+
+        <TaskBacklogQueue
+          tasks={openBacklogTasks}
+          subjects={subjects}
+          recentlyCompletedTask={recentlyCompletedBacklogTask}
+          onQuickAdd={handleQuickBacklogAdd}
+          onTaskComplete={handleBacklogTaskComplete}
+          onUndoTask={handleBacklogTaskUndo}
+        />
       </div>
 
       <HistoricalBoardDialog

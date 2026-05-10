@@ -7,6 +7,7 @@ import {
   splitMacroTaskText,
 } from '../data/catalog'
 import type {
+  BacklogTask,
   MacroTask,
   MicroTask,
   PlannerBackupSnapshot,
@@ -28,6 +29,7 @@ type NewMacroTask = Omit<
   MacroTask,
   'id' | 'order' | 'completed' | 'dependencies' | 'createdAt'
 >
+type NewBacklogTask = Omit<BacklogTask, 'id' | 'createdAt' | 'completed' | 'completedDate'>
 type PersistedMacroTask = Omit<MacroTask, 'startDate'> & { startDate?: string }
 
 const backupStorageKey = 'exam-planner-backups-v1'
@@ -38,6 +40,7 @@ interface PlannerState {
   subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
+  backlogTasks: BacklogTask[]
   backups: PlannerBackupSnapshot[]
   setView: (view: WorkspaceView) => void
   addSubject: () => void
@@ -50,6 +53,9 @@ interface PlannerState {
   updateMicroTask: (id: string, patch: Partial<MicroTask>) => void
   toggleMicroTask: (id: string) => void
   deleteMicroTask: (id: string) => void
+  addBacklogTask: (task: NewBacklogTask) => string
+  completeBacklogTask: (id: string, completedDate: string) => void
+  revertBacklogTask: (id: string) => void
   addMacroTask: (task: NewMacroTask) => void
   updateMacroTask: (id: string, patch: Partial<MacroTask>) => void
   toggleMacroTask: (id: string) => void
@@ -139,10 +145,49 @@ const createDefaultMicroTasks = (): MicroTask[] => {
   }))
 }
 
+const createDefaultBacklogTasks = (): BacklogTask[] => {
+  const seeds: Array<Omit<BacklogTask, 'id' | 'createdAt' | 'completed'>> = [
+    {
+      subjectId: 'math',
+      moduleId: 'gaoshu',
+      macroTaskId: 'math-hs-01',
+      title: '极限等价替换错因复扫 3 题',
+      source: '高数错题缓存',
+    },
+    {
+      subjectId: 'math',
+      moduleId: 'xiandai',
+      macroTaskId: 'math-la-01',
+      title: '伴随矩阵与秩条件盲点回温',
+      source: '线代盲点缓存',
+    },
+    {
+      subjectId: 'cs408',
+      moduleId: 'data-structure',
+      title: '树与图遍历边界条件复盘',
+      source: '408 错题缓存',
+    },
+    {
+      subjectId: 'english',
+      moduleId: 'reading',
+      title: '长难句指代关系二刷',
+      source: '阅读错因缓存',
+    },
+  ]
+
+  return seeds.map((task, index) => ({
+    ...task,
+    id: `backlog-${index + 1}`,
+    completed: false,
+    createdAt: new Date().toISOString(),
+  }))
+}
+
 const createInitialState = () => ({
   subjects: createDefaultSubjects(),
   macroTasks: createDefaultMacroTasks(),
   microTasks: createDefaultMicroTasks(),
+  backlogTasks: createDefaultBacklogTasks(),
   backups: [] as PlannerBackupSnapshot[],
 })
 
@@ -206,6 +251,30 @@ const sanitizeMigratedMicroTasks = (microTasks?: MicroTask[]) => {
   })
 }
 
+const sanitizeMigratedBacklogTasks = (backlogTasks?: BacklogTask[]) => {
+  if (!Array.isArray(backlogTasks)) return createDefaultBacklogTasks()
+
+  const defaults = createDefaultBacklogTasks()
+
+  return backlogTasks.map((task, index) => {
+    const fallback = defaults[index % defaults.length]
+    const completed = Boolean(task.completed)
+
+    return {
+      id: task.id || fallback.id,
+      subjectId: task.subjectId,
+      moduleId: task.moduleId,
+      macroTaskId: task.macroTaskId,
+      title: task.title || fallback.title,
+      source: task.source || fallback.source,
+      completed,
+      createdAt: task.createdAt || new Date().toISOString(),
+      availableDate: task.availableDate,
+      completedDate: completed ? task.completedDate : undefined,
+    }
+  })
+}
+
 const sanitizeSubjects = (subjects?: SubjectDefinition[]) => {
   if (!subjects || subjects.length === 0) return createDefaultSubjects()
 
@@ -242,6 +311,7 @@ const createBackupSnapshot = (state: {
   subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
+  backlogTasks: BacklogTask[]
 }): PlannerBackupSnapshot => ({
   id: makeId('backup'),
   createdAt: new Date().toISOString(),
@@ -249,6 +319,7 @@ const createBackupSnapshot = (state: {
   subjects: state.subjects,
   macroTasks: state.macroTasks,
   microTasks: state.microTasks,
+  backlogTasks: state.backlogTasks,
 })
 
 const mergeBackups = (state: {
@@ -257,6 +328,7 @@ const mergeBackups = (state: {
   subjects: SubjectDefinition[]
   macroTasks: MacroTask[]
   microTasks: MicroTask[]
+  backlogTasks: BacklogTask[]
 }) => {
   const nextSnapshots = [
     createBackupSnapshot(state),
@@ -321,6 +393,22 @@ const migratePlannerState = (persistedState: unknown, version: number) => {
     }
   }
 
+  if (version < 7) {
+    nextState = {
+      ...nextState,
+      backlogTasks: sanitizeMigratedBacklogTasks(nextState.backlogTasks),
+    }
+  }
+
+  nextState = {
+    ...nextState,
+    backlogTasks: sanitizeMigratedBacklogTasks(nextState.backlogTasks),
+    backups: (nextState.backups ?? []).map((backup) => ({
+      ...backup,
+      backlogTasks: sanitizeMigratedBacklogTasks(backup.backlogTasks),
+    })),
+  }
+
   return nextState as PlannerState
 }
 
@@ -329,6 +417,7 @@ const canDeleteSubject = (
   subjects: SubjectDefinition[],
   macroTasks: MacroTask[],
   microTasks: MicroTask[],
+  backlogTasks: BacklogTask[],
 ) => {
   const subject = subjects.find((item) => item.id === subjectId)
   if (!subject) return { ok: false, reason: '科目不存在' }
@@ -339,6 +428,9 @@ const canDeleteSubject = (
   if (microTasks.some((task) => task.subjectId === subjectId)) {
     return { ok: false, reason: '该 L0 下还有 L3，不能删除' }
   }
+  if (backlogTasks.some((task) => task.subjectId === subjectId)) {
+    return { ok: false, reason: '该 L0 下面还有温热任务，不能删除' }
+  }
   return { ok: true }
 }
 
@@ -346,12 +438,16 @@ const canDeleteModule = (
   moduleId: string,
   macroTasks: MacroTask[],
   microTasks: MicroTask[],
+  backlogTasks: BacklogTask[],
 ) => {
   if (macroTasks.some((task) => task.moduleId === moduleId)) {
     return { ok: false, reason: '该 L1 下还有 L2，不能删除' }
   }
   if (microTasks.some((task) => task.moduleId === moduleId)) {
     return { ok: false, reason: '该 L1 下还有 L3，不能删除' }
+  }
+  if (backlogTasks.some((task) => task.moduleId === moduleId)) {
+    return { ok: false, reason: '该 L1 下面还有温热任务，不能删除' }
   }
   return { ok: true }
 }
@@ -409,6 +505,7 @@ export const usePlannerStore = create<PlannerState>()(
           get().subjects,
           get().macroTasks,
           get().microTasks,
+          get().backlogTasks,
         )
         if (!guard.ok) return guard
 
@@ -468,7 +565,12 @@ export const usePlannerStore = create<PlannerState>()(
           }
         }),
       deleteModule: (moduleId) => {
-        const guard = canDeleteModule(moduleId, get().macroTasks, get().microTasks)
+        const guard = canDeleteModule(
+          moduleId,
+          get().macroTasks,
+          get().microTasks,
+          get().backlogTasks,
+        )
         if (!guard.ok) return guard
 
         set((state) => {
@@ -528,6 +630,42 @@ export const usePlannerStore = create<PlannerState>()(
             backups: mergeBackups(nextState),
           }
         }),
+      addBacklogTask: (task) => {
+        const id = makeId('backlog')
+        set((state) => {
+          const nextState = {
+            ...state,
+            backlogTasks: [
+              {
+                ...task,
+                id,
+                completed: false,
+                createdAt: new Date().toISOString(),
+              },
+              ...state.backlogTasks,
+            ],
+          }
+          return {
+            ...nextState,
+            backups: mergeBackups(nextState),
+          }
+        })
+        return id
+      },
+      completeBacklogTask: (id, completedDate) =>
+        set((state) => ({
+          backlogTasks: state.backlogTasks.map((task) =>
+            task.id === id ? { ...task, completed: true, completedDate } : task,
+          ),
+        })),
+      revertBacklogTask: (id) =>
+        set((state) => ({
+          backlogTasks: state.backlogTasks.map((task) =>
+            task.id === id
+              ? { ...task, completed: false, completedDate: undefined }
+              : task,
+          ),
+        })),
       addMacroTask: (task) =>
         set((state) => {
           const nextState = {
@@ -626,6 +764,7 @@ export const usePlannerStore = create<PlannerState>()(
             subjects: get().subjects,
             macroTasks: get().macroTasks,
             microTasks: get().microTasks,
+            backlogTasks: get().backlogTasks,
           },
           imported,
           mode,
@@ -636,12 +775,14 @@ export const usePlannerStore = create<PlannerState>()(
           subjects: merged.subjects,
           macroTasks: merged.macroTasks,
           microTasks: merged.microTasks,
+          backlogTasks: merged.backlogTasks,
           backups: mergeBackups({
             backups: get().backups,
             view: merged.view,
             subjects: merged.subjects,
             macroTasks: merged.macroTasks,
             microTasks: merged.microTasks,
+            backlogTasks: merged.backlogTasks,
           }),
         })
         return merged
@@ -654,6 +795,7 @@ export const usePlannerStore = create<PlannerState>()(
           subjects: backup.subjects,
           macroTasks: backup.macroTasks,
           microTasks: backup.microTasks,
+          backlogTasks: sanitizeMigratedBacklogTasks(backup.backlogTasks),
           backups: get().backups,
         })
         return true
@@ -682,7 +824,7 @@ export const usePlannerStore = create<PlannerState>()(
     {
       name: 'exam-planner-state-v1',
       storage: createJSONStorage(() => localStorage),
-      version: 6,
+      version: 7,
       migrate: migratePlannerState,
     },
   ),
